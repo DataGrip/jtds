@@ -1,6 +1,9 @@
 Changes from jTDS 1.2.8
 =======================
 
+11/13/2014 - Holger Rehn
+ o Applied patch #129 provided by lkoniecki (improved by Bain) to fix bug #725.
+
 05/30/2014 - Holger Rehn
  o Fixed bug #726, using setMaxRows() may affect batch operations performed on
    another Statement object using the same (physical) connection.
