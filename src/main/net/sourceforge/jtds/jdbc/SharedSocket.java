@@ -149,13 +149,12 @@ class SharedSocket {
      * The directory to buffer data to.
      */
     private final File bufferDir;
-    /**
-     * Total memory usage in all instances of the driver
-     * NB. Access to this field should probably be synchronized
-     * but in practice lost updates will not matter much and I think
-     * all VMs tend to do atomic saves to integer variables.
-     */
-    private static int globalMemUsage;
+
+   /**
+    * total memory usage in all instances of the driver
+    */
+   private static AtomicInteger                       _MemUsage       = new AtomicInteger();
+
     /**
      * Peak memory usage for debug purposes.
      */
@@ -732,108 +731,130 @@ class SharedSocket {
         }
     }
 
-    /**
-     * Save a packet buffer in a memory queue or to a disk queue if the global
-     * memory limit for the driver has been exceeded.
-     *
-     * @param vsock  the virtual socket owning this data
-     * @param buffer the data to queue
-     */
-    private void enqueueInput(VirtualSocket vsock, byte[] buffer)
-            throws IOException {
-        //
-        // Check to see if we should start caching to disk
-        //
-        if (globalMemUsage + buffer.length > memoryBudget &&
-                vsock.pktQueue.size() >= minMemPkts &&
-                !securityViolation &&
-                vsock.diskQueue == null) {
-            // Try to create a disk file for the queue
-            try {
-                vsock.queueFile = File.createTempFile("jtds", ".tmp", bufferDir);
-                // vsock.queueFile.deleteOnExit(); memory leak, see http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6664633
-                vsock.diskQueue = new RandomAccessFile(vsock.queueFile, "rw");
+   /**
+    * <p> Save a packet buffer in a memory queue or to a disk queue if the
+    * global memory limit for the driver has been exceeded. </p>
+    *
+    * @param vsock
+    *    the virtual socket owning this data
+    *
+    * @param buffer
+    *    the data to queue
+    */
+   private void enqueueInput( VirtualSocket vsock, byte[] buffer )
+      throws IOException
+   {
+      // check to see if we should start caching to disk
+      if( _MemUsage.get() + buffer.length > memoryBudget && vsock.pktQueue.size() >= minMemPkts && !securityViolation && vsock.diskQueue == null )
+      {
+         // try to create a disk file for the queue
+         try
+         {
+            vsock.queueFile = File.createTempFile( "jtds", ".tmp", bufferDir );
+            // vsock.queueFile.deleteOnExit(); memory leak, see http://bugs.java.com/bugdatabase/view_bug.do?bug_id=6664633
+            vsock.diskQueue = new RandomAccessFile( vsock.queueFile, "rw" );
 
-                // Write current cache contents to disk and free memory
-                byte[] tmpBuf;
+            // write current cache contents to disk and free memory
+            byte[] tmpBuf;
 
-                while (vsock.pktQueue.size() > 0) {
-                    tmpBuf = (byte[]) vsock.pktQueue.removeFirst();
-                    vsock.diskQueue.write(tmpBuf, 0, getPktLen(tmpBuf));
-                    vsock.pktsOnDisk++;
-                }
-            } catch (java.lang.SecurityException se) {
-                // Not allowed to cache to disk so carry on in memory
-                securityViolation = true;
-                vsock.queueFile = null;
-                vsock.diskQueue = null;
+            while( vsock.pktQueue.size() > 0 )
+            {
+               tmpBuf = (byte[]) vsock.pktQueue.removeFirst();
+               vsock.diskQueue.write( tmpBuf, 0, getPktLen( tmpBuf ) );
+               vsock.pktsOnDisk ++;
             }
-        }
+         }
+         catch( java.lang.SecurityException se )
+         {
+            // not allowed to cache to disk so carry on in memory
+            securityViolation = true;
+            vsock.queueFile = null;
+            vsock.diskQueue = null;
+         }
+      }
 
-        if (vsock.diskQueue != null) {
-            // Cache file exists so append buffer to it
-            vsock.diskQueue.write(buffer, 0, getPktLen(buffer));
-            vsock.pktsOnDisk++;
-        } else {
-            // Will cache in memory
-            vsock.pktQueue.addLast(buffer);
-            globalMemUsage += buffer.length;
+      if( vsock.diskQueue != null )
+      {
+         // cache file exists so append buffer to it
+         vsock.diskQueue.write( buffer, 0, getPktLen( buffer ) );
+         vsock.pktsOnDisk ++;
+      }
+      else
+      {
+         // will cache in memory
+         vsock.pktQueue.addLast( buffer );
+         int gm = _MemUsage.addAndGet( buffer.length );
 
-            if (globalMemUsage > peakMemUsage) {
-                peakMemUsage = globalMemUsage;
+         if( gm > peakMemUsage )
+         {
+            peakMemUsage = gm;
+         }
+      }
+
+      vsock.inputPkts ++;
+   }
+
+   /**
+    * <p> Read a cached packet from the in memory queue or from a disk based
+    * queue. </p>
+    *
+    * @param vsock
+    *    the virtual socket owning this data
+    *
+    * @return
+    *    a buffer containing the packet
+    */
+   private byte[] dequeueInput( VirtualSocket vsock )
+      throws IOException
+   {
+      byte[] buffer = null;
+
+      if( vsock.pktsOnDisk > 0 )
+      {
+         // data is cached on disk
+         if( vsock.diskQueue.getFilePointer() == vsock.diskQueue.length() )
+         {
+            // first read so rewind() file
+            vsock.diskQueue.seek( 0L );
+         }
+
+         vsock.diskQueue.readFully( hdrBuf, 0, TDS_HDR_LEN );
+
+         int len = getPktLen( hdrBuf );
+
+         buffer = new byte[len];
+         System.arraycopy( hdrBuf, 0, buffer, 0, TDS_HDR_LEN );
+         vsock.diskQueue.readFully( buffer, TDS_HDR_LEN, len - TDS_HDR_LEN );
+         vsock.pktsOnDisk--;
+
+         if( vsock.pktsOnDisk < 1 )
+         {
+            // file now empty so close and delete it
+            try
+            {
+               vsock.diskQueue.close();
+               vsock.queueFile.delete();
             }
-        }
-
-        vsock.inputPkts++;
-    }
-
-    /**
-     * Read a cached packet from the in memory queue or from a disk based queue.
-     *
-     * @param vsock the virtual socket owning this data
-     * @return a buffer containing the packet
-     */
-    private byte[] dequeueInput(VirtualSocket vsock)
-            throws IOException {
-        byte[] buffer = null;
-
-        if (vsock.pktsOnDisk > 0) {
-            // Data is cached on disk
-            if (vsock.diskQueue.getFilePointer() == vsock.diskQueue.length()) {
-                // First read so rewind() file
-                vsock.diskQueue.seek(0L);
+            finally
+            {
+               vsock.queueFile = null;
+               vsock.diskQueue = null;
             }
+         }
+      }
+      else if( vsock.pktQueue.size() > 0 )
+      {
+         buffer = (byte[]) vsock.pktQueue.removeFirst();
+         _MemUsage.addAndGet( -buffer.length );
+      }
 
-            vsock.diskQueue.readFully(hdrBuf, 0, TDS_HDR_LEN);
+      if( buffer != null )
+      {
+         vsock.inputPkts --;
+      }
 
-            int len = getPktLen(hdrBuf);
-
-            buffer = new byte[len];
-            System.arraycopy(hdrBuf, 0, buffer, 0, TDS_HDR_LEN);
-            vsock.diskQueue.readFully(buffer, TDS_HDR_LEN, len - TDS_HDR_LEN);
-            vsock.pktsOnDisk--;
-
-            if (vsock.pktsOnDisk < 1) {
-                // File now empty so close and delete it
-                try {
-                    vsock.diskQueue.close();
-                    vsock.queueFile.delete();
-                } finally {
-                    vsock.queueFile = null;
-                    vsock.diskQueue = null;
-                }
-            }
-        } else if (vsock.pktQueue.size() > 0) {
-            buffer = (byte[]) vsock.pktQueue.removeFirst();
-            globalMemUsage -= buffer.length;
-        }
-
-        if (buffer != null) {
-            vsock.inputPkts--;
-        }
-
-        return buffer;
-    }
+      return buffer;
+   }
 
     /**
      * Read a physical TDS packet from the network.

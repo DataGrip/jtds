@@ -2,6 +2,9 @@ Changes from jTDS 1.3.1
 =======================
 
 11/13/2014 - Holger Rehn
+ o Bugfix: The size of the in-memory packet buffer wasn't monitored correctly,
+   potentially causing the driver to occupy an unpredictable (large or small)
+   amount of RAM buffer before switching to disk based caching.
  o Applied patch #129 provided by lkoniecki (improved by Bain) to fix bug #725.
 
 05/30/2014 - Holger Rehn
