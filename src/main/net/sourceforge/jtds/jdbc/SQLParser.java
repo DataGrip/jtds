@@ -14,14 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public
 // License along with this library; if not, write to the Free Software
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-//
+
 package net.sourceforge.jtds.jdbc;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 
-import net.sourceforge.jtds.jdbc.cache.SQLCacheKey;
 import net.sourceforge.jtds.jdbc.cache.SimpleLRUCache;
 
 /**
@@ -89,12 +88,10 @@ class SQLParser {
     }
 
    /**
-    * a LRU cache for the last 500 parsed SQL statements
+    * a LRU cache for the last 1000 parsed SQL statements
     */
-   private final static SimpleLRUCache<SQLCacheKey,CachedSQLQuery> _Cache = new SimpleLRUCache( 1000 );
+   private final static SimpleLRUCache<ConInfo,CachedSQLQuery> _Cache = new SimpleLRUCache( 1000 );
 
-    /** Original SQL string */
-    private final String sql;
     /** Input buffer with SQL statement. */
     private final char[] in;
     /** Current position in input buffer. */
@@ -118,8 +115,12 @@ class SQLParser {
     private String keyWord;
     /** First table name in from clause */
     private String tableName;
-    /** Connection object for server specific parsing. */
-    private final JtdsConnection connection;
+
+   /**
+    * connection meta data required by the parser
+    */
+   private final ConInfo                                       _ConInfo;
+
 
    /**
     * <p> Parse the SQL statement processing JDBC escapes and parameter markers.
@@ -141,11 +142,12 @@ class SQLParser {
       throws SQLException
    {
       String[] ret;
+      ConInfo conInfo = new ConInfo( sql, connection );
 
       // don't cache extract table parse requests
       if( extractTable )
       {
-         ret = new SQLParser( sql, paramList, connection ).parse( extractTable );
+         ret = new SQLParser( paramList, conInfo ).parse( extractTable );
       }
       else
       {
@@ -156,16 +158,15 @@ class SQLParser {
          // By avoiding a synchronization block around the get()-parse()-put(), we
          // reduce the contention greatly in the nominal case.
 
-         SQLCacheKey cacheKey = new SQLCacheKey( sql, connection );
-         CachedSQLQuery cachedQuery = _Cache.get( cacheKey );
+         CachedSQLQuery cachedQuery = _Cache.get( conInfo );
 
          if( cachedQuery == null )
          {
             // parse statement
-            ret = new SQLParser( sql, paramList, connection ).parse( extractTable );
+            ret = new SQLParser( paramList, conInfo ).parse( extractTable );
 
             // update LRU cache
-            _Cache.put( cacheKey, new CachedSQLQuery( ret, paramList ) );
+            _Cache.put( conInfo, new CachedSQLQuery( ret, paramList ) );
          }
          else
          {
@@ -209,8 +210,8 @@ class SQLParser {
     /**
      * Determines if character could be part of an SQL identifier.
      * <p/>
-     * Characters > 127 are assumed to be unicode letters in other
-     * languages than english which is reasonable in this application.
+     * Characters > 127 are assumed to be Unicode letters in other
+     * languages than English which is reasonable in this application.
      * @param ch the character to test.
      * @return <code>boolean</code> true if ch in A-Z a-z 0-9 @ $ # _.
      */
@@ -221,20 +222,18 @@ class SQLParser {
     /**
      * Constructs a new parser object to process the supplied SQL.
      *
-     * @param sqlIn     the SQL statement to parse
      * @param paramList the parameter list array to populate or
      *                  <code>null</code> if no parameters are expected
-     * @param connection the parent Connection object
+     * @param conInfo the parent Connection object
      */
-    private SQLParser(String sqlIn, ArrayList paramList, JtdsConnection connection) {
-        sql = sqlIn;
-        in  = sql.toCharArray();
+    private SQLParser(ArrayList paramList, ConInfo conInfo) {
+        in  = conInfo.sql.toCharArray();
         len = in.length;
         out = new char[len];
         params = paramList;
         procName = "";
 
-        this.connection = connection;
+        _ConInfo = conInfo;
     }
 
     /**
@@ -256,7 +255,7 @@ class SQLParser {
                             "2A000");
                 }
                 // param marker embedded in escape
-                ParamInfo pi = new ParamInfo(d, connection.getUseUnicode());
+                ParamInfo pi = new ParamInfo(d, _ConInfo.unicode );
                 params.add(pi);
             }
 
@@ -315,7 +314,7 @@ class SQLParser {
                     "2A000");
         }
 
-        ParamInfo pi = new ParamInfo(pos, connection.getUseUnicode());
+        ParamInfo pi = new ParamInfo(pos, _ConInfo.unicode);
         pi.name = name;
 
         if (pos >= 0) {
@@ -429,14 +428,14 @@ class SQLParser {
       for( ; s < len; )
       {
          // skip whitespace
-         while( Character.isWhitespace( sql.charAt( s ) ) )
+         while( Character.isWhitespace( in[s] ) )
          {
             // skip white space without copying it
             s ++;
          }
 
          // check for comments to copy
-         switch( sql.charAt( s ) )
+         switch( in[s] )
          {
             case '-': // skip (and copy) single comment
                       if( s + 1 < len && in[s + 1] == '-' )
@@ -914,7 +913,7 @@ class SQLParser {
         // See if function mapped
         //
         String fn;
-        if (connection.getServerType() == Driver.SQLSERVER) {
+        if (_ConInfo.serverType == Driver.SQLSERVER) {
             fn = (String) msFnMap.get(name);
             if (fn == null) {
                 fn = (String) fnMap.get(name);
@@ -1243,20 +1242,18 @@ class SQLParser {
             // building a plain query) and this is not a procedure call.
             //
             if (params != null && params.size() > 255
-                    && connection.getPrepareSql() != TdsCore.UNPREPARED
+                    && _ConInfo.prepareSql != TdsCore.UNPREPARED
                     && procName != null) {
                 int limit = 255; // SQL 6.5 and Sybase < 12.50
-                if (connection.getServerType() == Driver.SYBASE) {
-                    if (connection.getDatabaseMajorVersion() > 12 ||
-                            connection.getDatabaseMajorVersion() == 12 &&
-                            connection.getDatabaseMinorVersion() >= 50) {
+                if (_ConInfo.serverType == Driver.SYBASE) {
+                    if (_ConInfo.majorVersion > 12 || _ConInfo.majorVersion == 12 && _ConInfo.minorVersion >= 50) {
                         limit = 2000; // Actually 2048 but allow some head room
                     }
                 } else {
-                    if (connection.getDatabaseMajorVersion() == 7) {
+                    if (_ConInfo.majorVersion == 7) {
                         limit = 1000; // Actually 1024
                     } else
-                    if (connection.getDatabaseMajorVersion() > 7) {
+                    if (_ConInfo.majorVersion > 7) {
                         limit = 2000; // Actually 2100
                     }
 
@@ -1271,7 +1268,7 @@ class SQLParser {
             String result[] = new String[4];
 
             // return sql and procname
-            result[0] = (isModified) ? new String(out, 0, d) : sql;
+            result[0] = (isModified) ? new String(out, 0, d) : _ConInfo.sql;
             result[1] = procName;
             result[2] = (keyWord == null) ? "" : keyWord;
             result[3] = tableName;
@@ -1284,4 +1281,113 @@ class SQLParser {
                     "22025");
         }
     }
+
+   // private inner class ConInfo //////////////////////////////////////////////
+
+   /**
+    * <p> Primitive data structure holding all connection specifics required
+    * by the SQL query. </p>
+    *
+    * <p> Instances of this class may are used as key values in the SQL parser's
+    * internal statement cache. </p>
+    *
+    * @author
+    *    Brett Wooldridge, Alin Sinpalean, Holger Rehn
+    */
+   private static class ConInfo
+   {
+
+      // public instance fields ////////////////////////////////////////////////
+
+      /**
+       * the unmodified original SQL statement
+       */
+      public final String  sql;
+
+      /**
+       * DB server type
+       */
+      public final int     serverType;
+
+      /**
+       * DB server major version
+       */
+      public final int     majorVersion;
+
+      /**
+       * DB server minor version
+       */
+      public final int     minorVersion;
+
+      /**
+       * setting of the connection property "prepareSQL"
+       */
+      public final int     prepareSql;
+
+      /**
+       * setting of the connection property "sendStringParametersAsUnicode"
+       */
+      public final boolean unicode;
+
+      // private instance fields ///////////////////////////////////////////////
+
+      /**
+       * object hash code
+       */
+      private final int    _HashCode;
+
+      // public constructor ////////////////////////////////////////////////////
+
+      /**
+       * <p> Construct a new {@link ConInfo} for the given SQL statement and
+       * {@link JtdsConnection}. </p>
+       *
+       * @param statement
+       *    the unmodified original SQL statement
+       *
+       * @param connection
+       *    {@link JtdsConnection} to extract relevant meta data from
+       */
+      public ConInfo( String statement, JtdsConnection connection )
+      {
+         sql          = statement;
+         serverType   = connection.getServerType();
+         majorVersion = connection.getDatabaseMajorVersion();
+         minorVersion = connection.getDatabaseMinorVersion();
+         prepareSql   = connection.getPrepareSql();
+         unicode      = connection.getUseUnicode();
+         _HashCode    = statement.hashCode() ^ ( serverType << 24 | majorVersion << 16 | minorVersion ) + prepareSql;
+      }
+
+      // overridden methods of class Object ////////////////////////////////////
+
+      /**
+       * {@inheritDoc}
+       */
+      public int hashCode()
+      {
+         return _HashCode;
+      }
+
+      /**
+       * {@inheritDoc}
+       */
+      public boolean equals( Object object )
+      {
+         if( ! ( object instanceof ConInfo ) )
+            return false;
+
+         ConInfo key = (ConInfo) object;
+
+         return _HashCode    == key._HashCode
+             && serverType   == key.serverType
+             && majorVersion == key.majorVersion
+             && minorVersion == key.minorVersion
+             && prepareSql   == key.prepareSql
+             && unicode      == key.unicode
+             && sql.equals( key.sql );
+      }
+
+   }
+
 }
