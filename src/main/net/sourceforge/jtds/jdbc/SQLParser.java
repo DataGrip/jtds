@@ -170,6 +170,7 @@ class SQLParser {
          }
          else
          {
+            // REVIEW: potentially insecure, the array could be modified be the caller, corrupting the cache
             ret = cachedQuery.parsedSql;
 
             // create ParamInfo objects from CachedSQLQuery
@@ -1286,7 +1287,7 @@ class SQLParser {
 
    /**
     * <p> Primitive data structure holding all connection specifics required
-    * by the SQL query. </p>
+    * by the SQL parser. </p>
     *
     * <p> Instances of this class may are used as key values in the SQL parser's
     * internal statement cache. </p>
