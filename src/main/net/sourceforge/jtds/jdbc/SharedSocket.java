@@ -138,7 +138,7 @@ class SharedSocket {
     /**
      * Table of stream objects sharing this socket.
      */
-    private final ConcurrentMap<Integer,VirtualSocket> _VirtualSockets = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Integer,VirtualSocket> _VirtualSockets = new ConcurrentHashMap<Integer,VirtualSocket>();
     /**
      * The virtual socket of the object that is expecting a response from the server.
      */
