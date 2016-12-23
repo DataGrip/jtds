@@ -133,7 +133,7 @@ public class BatchTest extends DatabaseTestCase {
         } catch (BatchUpdateException e) {
             x = e.getUpdateCounts();
         }
-        if (con.getMetaData().getDatabaseProductName().toLowerCase().startsWith("microsoft")
+        if (con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).startsWith("microsoft")
             && ((JtdsDatabaseMetaData) con.getMetaData()).getDatabaseMajorVersion() > 6 ) {
             assertEquals(5, x.length);
             assertEquals(1, x[0]);
@@ -187,7 +187,7 @@ public class BatchTest extends DatabaseTestCase {
         } catch (BatchUpdateException e) {
             x = e.getUpdateCounts();
         }
-        if (con.getMetaData().getDatabaseProductName().toLowerCase().startsWith("microsoft")) {
+        if (con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).startsWith("microsoft")) {
             assertEquals(5, x.length);
             assertEquals(1, x[0]);
             assertEquals(1, x[1]);
@@ -264,7 +264,7 @@ public class BatchTest extends DatabaseTestCase {
             } catch (BatchUpdateException e) {
                 x = e.getUpdateCounts();
             }
-            if (con.getMetaData().getDatabaseProductName().toLowerCase().startsWith("microsoft")) {
+            if (con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).startsWith("microsoft")) {
                 assertEquals(5, x.length);
                 assertEquals(1, x[0]);
                 assertEquals(1, x[1]);
@@ -309,7 +309,7 @@ public class BatchTest extends DatabaseTestCase {
             } catch (BatchUpdateException e) {
                 x = e.getUpdateCounts();
             }
-            if (con.getMetaData().getDatabaseProductName().toLowerCase().startsWith("microsoft")) {
+            if (con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).startsWith("microsoft")) {
                 assertEquals(5, x.length);
                 assertEquals(1, x[0]);
                 assertEquals(1, x[1]);

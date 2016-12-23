@@ -25,6 +25,7 @@ import java.sql.SQLWarning;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.Locale;
 
 /**
  * jTDS implementation of the java.sql.Statement interface.<p>
@@ -774,7 +775,7 @@ public class JtdsStatement implements java.sql.Statement
             // see if we can extract "insert" from start of statement
             sql = sql.trim();
             if (sql.length() > 5) {
-                sqlWord = sql.substring(0,6).toLowerCase();
+                sqlWord = sql.substring(0,6).toLowerCase( Locale.ENGLISH );
             }
         }
         

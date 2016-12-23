@@ -22,6 +22,7 @@ import java.sql.*;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Random;
 
 import net.sourceforge.jtds.ssl.*;
@@ -3007,7 +3008,7 @@ public class TdsCore {
             build = in.read() << 8;
             build += in.read();
         } else {
-            if (product.toLowerCase().startsWith("microsoft")) {
+            if (product.toLowerCase( Locale.ENGLISH ).startsWith("microsoft")) {
                 in.skip(1);
                 major = in.read();
                 minor = in.read();
@@ -4100,7 +4101,7 @@ public class TdsCore {
         String name;
 
         try {
-            name = java.net.InetAddress.getLocalHost().getHostName().toUpperCase();
+            name = java.net.InetAddress.getLocalHost().getHostName().toUpperCase( Locale.ENGLISH );
         } catch (java.net.UnknownHostException e) {
             hostName = "UNKNOWN";
             return hostName;

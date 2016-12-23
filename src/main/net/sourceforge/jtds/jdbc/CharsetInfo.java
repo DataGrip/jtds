@@ -19,6 +19,7 @@ package net.sourceforge.jtds.jdbc;
 
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Enumeration;
 import java.io.InputStream;
@@ -37,7 +38,7 @@ import net.sourceforge.jtds.util.Logger;
  * of the <code>get</code> methods.
  *
  * @author Alin Sinpalean
- * @version $Id: CharsetInfo.java,v 1.5 2007-07-08 17:28:23 bheineman Exp $
+ * @author Holger Rehn
  */
 public final class CharsetInfo {
     //
@@ -140,18 +141,18 @@ public final class CharsetInfo {
     }
 
     /**
-     * Retrieves the <code>CharsetInfo</code> instance asociated with the
+     * Retrieves the <code>CharsetInfo</code> instance associated with the
      * specified server charset.
      *
      * @param serverCharset the server-specific character set name
      * @return the associated <code>CharsetInfo</code>
      */
     public static CharsetInfo getCharset(String serverCharset) {
-        return (CharsetInfo) charsets.get(serverCharset.toUpperCase());
+        return (CharsetInfo) charsets.get(serverCharset.toUpperCase( Locale.ENGLISH ));
     }
 
     /**
-     * Retrieves the <code>CharsetInfo</code> instance asociated with the
+     * Retrieves the <code>CharsetInfo</code> instance associated with the
      * specified LCID.
      *
      * @param lcid the server LCID
@@ -162,7 +163,7 @@ public final class CharsetInfo {
     }
 
     /**
-     * Retrieves the <code>CharsetInfo</code> instance asociated with the
+     * Retrieves the <code>CharsetInfo</code> instance associated with the
      * specified sort order.
      *
      * @param sortOrder the server sort order
@@ -173,7 +174,7 @@ public final class CharsetInfo {
     }
 
     /**
-     * Retrieves the <code>CharsetInfo</code> instance asociated with the
+     * Retrieves the <code>CharsetInfo</code> instance associated with the
      * specified collation.
      *
      * @param collation the server LCID
@@ -233,7 +234,7 @@ public final class CharsetInfo {
     }
 
     /**
-     * Retrieves whether the caracter set is wide (ie multi-byte).
+     * Retrieves whether the character set is wide (ie multi-byte).
      */
     public boolean isWideChars() {
         return wideChars;

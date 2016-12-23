@@ -31,13 +31,14 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Properties;
 
 import junit.framework.TestCase;
 
 /**
- * @author  builder
- * @version $Id: TestBase.java,v 1.21.2.1 2009-08-04 10:33:54 ickzon Exp $
+ * @author builder
+ * @author Holger Rehn
  */
 public abstract class TestBase extends TestCase {
 
@@ -98,7 +99,7 @@ public abstract class TestBase extends TestCase {
         disconnect();
         con = getConnection();
 
-        MSSQL = con.getMetaData().getDatabaseProductName().toLowerCase().contains( "microsoft" );
+        MSSQL = con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).contains( "microsoft" );
     }
 
    /**

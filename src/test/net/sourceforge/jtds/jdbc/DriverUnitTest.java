@@ -480,7 +480,7 @@ public class DriverUnitTest extends UnitTestBase {
 //                                    url.append('=').append(property[j][1]);
 //                                }
 //
-//                                p.put(property[j][0].toUpperCase(), (property[j][1] == null ? "" : property[j][1]));
+//                                p.put(property[j][0].toUpperCase( Locale.ENGLISH ), (property[j][1] == null ? "" : property[j][1]));
 //                            }
 //
 //                            res.put(url.toString(), p);

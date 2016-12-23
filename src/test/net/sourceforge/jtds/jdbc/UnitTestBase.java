@@ -21,6 +21,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Locale;
 
 import junit.framework.Assert;
 
@@ -28,7 +29,7 @@ import junit.framework.Assert;
  * Base class for unit tests which do not connect to a database.
  *
  * @author David D. Kilzer
- * @version $Id: UnitTestBase.java,v 1.12 2005-12-22 17:24:07 ddkilzer Exp $
+ * @author Holger Rehn
  */
 public abstract class UnitTestBase extends DatabaseTestCase {
 
@@ -311,9 +312,9 @@ public abstract class UnitTestBase extends DatabaseTestCase {
     protected static String ucFirst(String s) {
         if (s == null || s.length() == 0) return s;
         if (s.length() == 1) {
-            return s.toUpperCase();
+            return s.toUpperCase( Locale.ENGLISH );
         }
-        return s.substring(0, 1).toUpperCase() + s.substring(1);
+        return s.substring(0, 1).toUpperCase( Locale.ENGLISH ) + s.substring(1);
     }
 
 }

@@ -41,6 +41,7 @@ import java.sql.Types;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
 import java.util.HashMap;
+import java.util.Locale;
 
 import net.sourceforge.jtds.util.Logger;
 
@@ -59,7 +60,7 @@ import net.sourceforge.jtds.util.Logger;
  *
  * @author Mike Hutchinson
  * @author jTDS project
- * @version $Id: Support.java,v 1.56.2.6 2010-05-17 09:36:57 ickzon Exp $
+ * @author Holger Rehn
  */
 public class Support {
     // Constants used in datatype conversions to avoid object allocations.
@@ -1399,7 +1400,7 @@ public class Support {
      * else <code>false</code>.
      */
     public static boolean isWindowsOS() {
-        return System.getProperty("os.name").toLowerCase().startsWith("windows");
+        return System.getProperty("os.name").toLowerCase( Locale.ENGLISH ).startsWith("windows");
     }
 
     // ------------- Private methods  ---------

@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 /**
@@ -173,7 +174,7 @@ public class StatementTest extends TestBase
       catch( SQLException e )
       {
          // expected, executeUpdate() cannot return a resultset
-         assertTrue( e.getMessage().toLowerCase().contains( "executeupdate" ) );
+         assertTrue( e.getMessage().toLowerCase( Locale.ENGLISH ).contains( "executeupdate" ) );
       }
 
       st.close();

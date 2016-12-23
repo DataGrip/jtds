@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.HashSet;
@@ -54,7 +55,7 @@ import net.sourceforge.jtds.util.*;
  *
  * @author Mike Hutchinson
  * @author Alin Sinpalean
- * @version $Id: ConnectionJDBC2.java,v 1.119.2.14 2010-05-17 10:27:00 ickzon Exp $
+ * @author Holger Rehn
  */
 public class ConnectionJDBC2 implements java.sql.Connection {
     /**
@@ -95,7 +96,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
      * Conection attributes
      */
 
-    /** The orginal connection URL. */
+    /** The original connection URL. */
     private final String url;
     /** The server host name. */
     private String serverName;
@@ -159,7 +160,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
     private int transactionIsolation = java.sql.Connection.TRANSACTION_READ_COMMITTED;
     /** Default auto commit state. */
     private volatile boolean autoCommit = true;
-    /** Diagnostc messages for this connection. */
+    /** Diagnostic messages for this connection. */
     private final SQLDiagnostic messages;
     /** Connection's current rowcount limit. */
     private int rowCount;
@@ -183,7 +184,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
     private int maxStatements;
     /** Statement cache.*/
     private StatementCache statementCache;
-    /** Send parameters as unicode. */
+    /** Send parameters as Unicode. */
     private boolean useUnicode = true;
     /** Use named pipe IPC instead of TCP/IP sockets. */
     private boolean namedPipe;
@@ -509,7 +510,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
             catch (IOException ioe) {
                 exceptionCount++;
                 lastIOException = ioe;
-                if (ioe.getMessage().toLowerCase().indexOf("all pipe instances are busy") >= 0) {
+                if (ioe.getMessage().toLowerCase( Locale.ENGLISH ).indexOf("all pipe instances are busy") >= 0) {
                     // Per a Microsoft knowledgebase article, wait 200 ms to 1 second each time
                     // we get an "All pipe instances are busy" error.
                     // http://support.microsoft.com/default.aspx?scid=KB;EN-US;165189
@@ -576,7 +577,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
      * @return the next temporary SP name as a <code>String</code>
      */
     String getProcName() {
-        String seq = "000000" + Integer.toHexString(spSequenceNo++).toUpperCase();
+        String seq = "000000" + Integer.toHexString(spSequenceNo++).toUpperCase( Locale.ENGLISH );
 
         return "#jtds" + seq.substring(seq.length() - 6, seq.length());
     }
@@ -587,7 +588,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
      * @return the next cursor name as a <code>String</code>
      */
     synchronized String getCursorName() {
-        String seq = "000000" + Integer.toHexString(cursorSequenceNo++).toUpperCase();
+        String seq = "000000" + Integer.toHexString(cursorSequenceNo++).toUpperCase( Locale.ENGLISH );
 
         return "_jtds" + seq.substring(seq.length() - 6, seq.length());
     }
@@ -1181,7 +1182,7 @@ public class ConnectionJDBC2 implements java.sql.Connection {
         //note:mdb in certain cases (e.g. NTLMv2) the domain name must be
         //  all upper case for things to work.
         if( domainName != null )
-            domainName = domainName.toUpperCase();
+            domainName = domainName.toUpperCase( Locale.ENGLISH );
 
         Integer parsedTdsVersion =
                 DefaultProperties.getTdsVersion(info.getProperty(Messages.get(Driver.TDS)));

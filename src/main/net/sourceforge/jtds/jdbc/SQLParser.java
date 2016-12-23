@@ -20,6 +20,7 @@ package net.sourceforge.jtds.jdbc;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Locale;
 
 import net.sourceforge.jtds.jdbc.cache.SQLCacheKey;
 import net.sourceforge.jtds.jdbc.cache.SimpleLRUCache;
@@ -299,7 +300,7 @@ class SQLParser {
            append(in[s++]);
         }
 
-        return String.valueOf(out, start, d - start).toLowerCase();
+        return String.valueOf(out, start, d - start).toLowerCase( Locale.ENGLISH );
     }
 
     /**
@@ -814,7 +815,7 @@ class SQLParser {
             nameBuf.append(in[s++]);
         }
 
-        String name = nameBuf.toString().toLowerCase();
+        String name = nameBuf.toString().toLowerCase( Locale.ENGLISH );
         //
         // Now collect arguments
         //
@@ -893,7 +894,7 @@ class SQLParser {
         // argument converted to an SQL server type
         //
         if ("convert".equals(name) && arg2Start < args.length() - 1) {
-            String arg2 = args.substring(arg2Start + 1).trim().toLowerCase();
+            String arg2 = args.substring(arg2Start + 1).trim().toLowerCase( Locale.ENGLISH );
             String dataType = (String) cvMap.get(arg2);
 
             if (dataType == null) {

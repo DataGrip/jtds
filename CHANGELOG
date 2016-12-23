@@ -1,6 +1,10 @@
 Changes from jTDS 1.2.8
 =======================
 
+12/23/2016 - Holger Rehn
+ o Fixed bug #576, wrong conversion of INSERT to lowercase.
+ o Fixed wrong case conversion of key words and identifiers in certain locales.
+
 11/13/2014 - Holger Rehn
  o Applied patch #129 provided by lkoniecki (improved by Bain) to fix bug #725.
 

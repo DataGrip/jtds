@@ -20,6 +20,7 @@ package net.sourceforge.jtds.jdbcx;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.Locale;
 
 import javax.naming.Context;
 import javax.naming.Name;
@@ -114,13 +115,13 @@ public class JtdsObjectFactory implements ObjectFactory
       while( c.hasMoreElements() )
       {
          RefAddr ra = (RefAddr) c.nextElement();
-         values.put( ra.getType().toLowerCase(), ra.getContent() );
+         values.put( ra.getType().toLowerCase( Locale.ENGLISH ), ra.getContent() );
       }
 
       for( int i = 0; i < props.length; i ++ )
       {
          String value = (String) values.get( props[i] );
-         value = value == null && props[i] != JtdsDataSource.DESCRIPTION ? (String) values.get( Messages.get( props[i] ).toLowerCase() ) : value;
+         value = value == null && props[i] != JtdsDataSource.DESCRIPTION ? (String) values.get( Messages.get( props[i] ).toLowerCase( Locale.ENGLISH ) ) : value;
 
          if( value != null )
          {
