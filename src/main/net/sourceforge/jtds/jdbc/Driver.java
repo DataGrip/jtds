@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 
@@ -35,7 +36,7 @@ import net.sourceforge.jtds.ssl.Ssl;
  * Implementation note:
  * <ol>
  * <li>Property text names and descriptions are loaded from an external file resource.
- *     This allows the actual names and descriptions to be changed or localised without
+ *     This allows the actual names and descriptions to be changed or localized without
  *     impacting this code.
  * <li>The way in which the URL is parsed and converted to properties is rather
  *     different from the original jTDS Driver class.
@@ -45,7 +46,7 @@ import net.sourceforge.jtds.ssl.Ssl;
  * @author Brian Heineman
  * @author Mike Hutchinson
  * @author Alin Sinpalean
- * @version $Id: Driver.java,v 1.70.2.4 2009-12-30 11:19:40 ickzon Exp $
+ * @author Holger Rehn
  */
 public class Driver implements java.sql.Driver {
     /** URL prefix used by the driver (i.e <code>jdbc:jtds:</code>). */
@@ -170,12 +171,12 @@ public class Driver implements java.sql.Driver {
             return false;
         }
 
-        return url.toLowerCase().startsWith(driverPrefix);
+        return url.toLowerCase( Locale.ENGLISH ).startsWith(driverPrefix);
     }
 
     public Connection connect(String url, Properties info)
         throws SQLException  {
-        if (url == null || !url.toLowerCase().startsWith(driverPrefix)) {
+        if (url == null || !url.toLowerCase( Locale.ENGLISH ).startsWith(driverPrefix)) {
             return null;
         }
 
@@ -345,7 +346,7 @@ public class Driver implements java.sql.Driver {
             String value = info.getProperty(key);
 
             if (value != null) {
-                props.setProperty(key.toUpperCase(), value);
+                props.setProperty(key.toUpperCase( Locale.ENGLISH ), value);
             }
         }
 
@@ -365,7 +366,7 @@ public class Driver implements java.sql.Driver {
         }
 
         pos = nextToken(url, pos, token); // Get server type
-        String type = token.toString().toLowerCase();
+        String type = token.toString().toLowerCase( Locale.ENGLISH );
 
         Integer serverType = DefaultProperties.getServerType(type);
         if (serverType == null) {
@@ -416,9 +417,9 @@ public class Driver implements java.sql.Driver {
             int index = tmp.indexOf('=');
 
             if (index > 0 && index < tmp.length() - 1) {
-                props.setProperty(tmp.substring(0, index).toUpperCase(), tmp.substring(index + 1));
+                props.setProperty(tmp.substring(0, index).toUpperCase( Locale.ENGLISH ), tmp.substring(index + 1));
             } else {
-                props.setProperty(tmp.toUpperCase(), "");
+                props.setProperty(tmp.toUpperCase( Locale.ENGLISH ), "");
             }
         }
 

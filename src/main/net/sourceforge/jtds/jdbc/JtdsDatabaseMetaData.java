@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * jTDS implementation of the java.sql.DatabaseMetaData interface.
@@ -39,16 +40,16 @@ import java.util.List;
  * functions should be altered to return 0 but for now the original jTDS
  * values are returned.
  *
- * @author   Craig Spannring
- * @author   The FreeTDS project
- * @author   Alin Sinpalean
+ * @author Craig Spannring
+ * @author The FreeTDS project
+ * @author Alin Sinpalean
+ * @author Holger Rehn
  *  created  17 March 2001
- * @version $Id: JtdsDatabaseMetaData.java,v 1.37.2.4 2009-12-30 08:45:34 ickzon Exp $
  */
 public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
     static final int sqlStateXOpen = 1;
 
-    // Internal data needed by this implemention.
+    // Internal data needed by this implementation.
     private final int tdsVersion;
     private final int serverType;
     private final JtdsConnection connection;
@@ -461,7 +462,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
                     rsTmp.updateInt(7, rs.getInt(7));
                 }
                 // add "IS_AUTOINCREMENT" value
-                rsTmp.updateString( 23, typeName.toLowerCase().contains( "identity" ) ? "YES" : "NO" );
+                rsTmp.updateString( 23, typeName.toLowerCase( Locale.ENGLISH ).contains( "identity" ) ? "YES" : "NO" );
             } else {
                 // MS SQL Server - Mainly OK but we need to fix some data types.
                 for (int i = 1; i <= colCnt; i++) {
@@ -479,7 +480,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
                     }
                 }
                 // add "IS_AUTOINCREMENT" value
-                rsTmp.updateString( 23, typeName.toLowerCase().contains( "identity" ) ? "YES" : "NO" );
+                rsTmp.updateString( 23, typeName.toLowerCase( Locale.ENGLISH ).contains( "identity" ) ? "YES" : "NO" );
             }
             rsTmp.insertRow();
         }
@@ -3102,7 +3103,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
      */
     public boolean supportsResultSetConcurrency(int type, int concurrency)
             throws SQLException {
-        // jTDS supports both all standard ResultSet concurencies plus
+        // jTDS supports both all standard ResultSet concurrencies plus
         // CONCUR_UPDATABLE + 1 and CONCUR_UPDATABLE + 2, except the
         // TYPE_SCROLL_INSENSITIVE/CONCUR_UPDATABLE combination on SQL Server
         if (!supportsResultSetType(type)) {
@@ -3163,7 +3164,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
      * @throws SQLException if a database access error occurs
      */
     public boolean othersUpdatesAreVisible(int type) throws SQLException {
-        // Updates are visibile in scroll sensitive ResultSets
+        // Updates are visible in scroll sensitive ResultSets
         return type >= ResultSet.TYPE_SCROLL_SENSITIVE;
     }
 
@@ -3176,7 +3177,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
      * @throws SQLException if a database access error occurs
      */
     public boolean othersDeletesAreVisible(int type) throws SQLException {
-        // Deletes are visibile in scroll sensitive ResultSets
+        // Deletes are visible in scroll sensitive ResultSets
         return type >= ResultSet.TYPE_SCROLL_SENSITIVE;
     }
 
@@ -3189,7 +3190,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
      * @throws SQLException if a database access error occurs
      */
     public boolean othersInsertsAreVisible(int type) throws SQLException {
-        // Inserts are only visibile with dynamic cursors
+        // Inserts are only visible with dynamic cursors
         return type == ResultSet.TYPE_SCROLL_SENSITIVE + 1;
     }
 
@@ -3379,7 +3380,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
 
     /**
      * Returns <code>true</code> if getting auto-generated keys is supported after a
-     * statment is executed; returns <code>false</code> otherwise
+     * statement is executed; returns <code>false</code> otherwise
      */
     public boolean supportsGetGeneratedKeys() throws SQLException {
         return true;
@@ -3425,7 +3426,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
     /**
      * Format the supplied search pattern to transform the escape \x into [x].
      *
-     * @param pattern the pattern to tranform
+     * @param pattern the pattern to transform
      * @return the transformed pattern as a <code>String</code>
      */
     private static String processEscapes(String pattern) {
@@ -3493,7 +3494,7 @@ public class JtdsDatabaseMetaData implements java.sql.DatabaseMetaData {
         for (int i = 1; i <= cnt; i++) {
             String name = rsmd.getColumnLabel(i);
             if (name != null && name.length() > 0) {
-                results.setColLabel(i, name.toUpperCase());
+                results.setColLabel(i, name.toUpperCase( Locale.ENGLISH ));
             }
         }
     }

@@ -31,6 +31,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Properties;
 
 import junit.framework.TestCase;
@@ -98,7 +99,7 @@ public abstract class TestBase extends TestCase {
         disconnect();
         con = getConnection();
 
-        MSSQL = con.getMetaData().getDatabaseProductName().toLowerCase().contains( "microsoft" );
+        MSSQL = con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).contains( "microsoft" );
     }
 
    /**

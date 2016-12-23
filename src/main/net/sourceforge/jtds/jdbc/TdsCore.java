@@ -28,6 +28,7 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Random;
 
 import org.ietf.jgss.GSSContext;
@@ -48,7 +49,7 @@ import net.sourceforge.jtds.util.TimerThread;
  * <ol>
  * <li>This class, together with TdsData, encapsulates all of the TDS specific logic
  *     required by the driver.
- * <li>This is a ground up reimplementation of the TDS protocol and is rather
+ * <li>This is a ground up re-implementation of the TDS protocol and is rather
  *     simpler, and hopefully easier to understand, than the original.
  * <li>The layout of the various Login packets is derived from the original code
  *     and freeTds work, and incorporates changes including the ability to login as a TDS 5.0 user.
@@ -1866,7 +1867,7 @@ public class TdsCore {
         putLoginString(language, 30);  // language
 
         out.write((byte) 1);  // notify on lang change
-        out.write((short) 0);  // security label hierachy
+        out.write((short) 0);  // security label hierarchy
         out.write((byte) 0);  // security encrypted
         out.write(empty, 0, 8);  // security components
         out.write((short) 0);  // security spare
@@ -3111,7 +3112,7 @@ public class TdsCore {
             build = in.read() << 8;
             build += in.read();
         } else {
-            if (product.toLowerCase().startsWith("microsoft")) {
+            if (product.toLowerCase( Locale.ENGLISH ).startsWith("microsoft")) {
                 in.skip(1);
                 major = in.read();
                 minor = in.read();
@@ -4242,7 +4243,7 @@ public class TdsCore {
         String name;
 
         try {
-            name = java.net.InetAddress.getLocalHost().getHostName().toUpperCase();
+            name = java.net.InetAddress.getLocalHost().getHostName().toUpperCase( Locale.ENGLISH );
         } catch (java.net.UnknownHostException e) {
             hostName = "UNKNOWN";
             return hostName;
@@ -4578,7 +4579,7 @@ public class TdsCore {
     */
    static boolean isWindowsOS()
    {
-      return System.getProperty( "os.name" ).toLowerCase().contains( "windows" );
+      return System.getProperty( "os.name" ).toLowerCase( Locale.ENGLISH ).contains( "windows" );
    }
 
    /**

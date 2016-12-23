@@ -29,16 +29,15 @@ import java.sql.DriverPropertyInfo;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
-
-
 
 /**
  * Unit tests for the {@link Driver} class.
  *
  * @author David D. Kilzer
- * @version $Id: DriverUnitTest.java,v 1.20 2007-07-08 18:08:54 bheineman Exp $
+ * @author Holger Rehn
  */
 public class DriverUnitTest extends UnitTestBase {
 
@@ -482,7 +481,7 @@ public class DriverUnitTest extends UnitTestBase {
                                     url.append('=').append(property[j][1]);
                                 }
 
-                                p.put(property[j][0].toUpperCase(), (property[j][1] == null ? "" : property[j][1]));
+                                p.put(property[j][0].toUpperCase( Locale.ENGLISH ), (property[j][1] == null ? "" : property[j][1]));
                             }
 
                             res.put(url.toString(), p);

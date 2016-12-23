@@ -23,6 +23,7 @@ import net.sourceforge.jtds.util.MD5Digest;
 
 import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
+import java.util.Locale;
 
 /**
  * This class calculates the two "responses" to the nonce supplied by the server
@@ -32,7 +33,7 @@ import java.util.Arrays;
  *     http://davenport.sourceforge.net/ntlm.html
  *
  * @author Matt Brinkley
- * @version $Id: NtlmAuth.java,v 1.7 2006-06-23 18:00:56 matt_brinkley Exp $
+ * @author Holger Rehn
  */
 public class NtlmAuth {
 
@@ -111,7 +112,7 @@ public class NtlmAuth {
     private static byte[] ntv2Hash(String domain, String user, String password)
         throws UnsupportedEncodingException {
         byte[] hash = ntHash(password);
-        String identity = user.toUpperCase() + domain.toUpperCase();
+        String identity = user.toUpperCase( Locale.ENGLISH ) + domain.toUpperCase( Locale.ENGLISH );
         byte[] identityBytes = identity.getBytes("UnicodeLittleUnmarked");
 
         return hmacMD5(identityBytes, hash);
@@ -291,7 +292,7 @@ public class NtlmAuth {
     }
 
     /**
-     * Creates the md4 hash of the unicode password. This is used as the DES
+     * Creates the md4 hash of the Unicode password. This is used as the DES
      * key when encrypting the nonce for NTLM challenge-response
      */
     private static byte[] ntHash(String password)
@@ -313,7 +314,7 @@ public class NtlmAuth {
      */
     private static byte[] convertPassword(String password)
         throws UnsupportedEncodingException {
-        byte[] pwd = password.toUpperCase().getBytes("UTF8");
+        byte[] pwd = password.toUpperCase( Locale.ENGLISH ).getBytes("UTF8");
 
         byte[] rtn = new byte[14];
         Arrays.fill(rtn, (byte) 0);

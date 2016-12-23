@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.HashSet;
@@ -55,7 +56,7 @@ import net.sourceforge.jtds.util.*;
  *
  * @author Mike Hutchinson
  * @author Alin Sinpalean
- * @version $Id: JtdsConnection.java,v 1.119.2.14 2010-05-17 10:27:00 ickzon Exp $
+ * @author Holger Rehn
  */
 public class JtdsConnection implements java.sql.Connection {
     /**
@@ -524,7 +525,7 @@ public class JtdsConnection implements java.sql.Connection {
             catch (IOException ioe) {
                 exceptionCount++;
                 lastIOException = ioe;
-                if (ioe.getMessage().toLowerCase().indexOf("all pipe instances are busy") >= 0) {
+                if (ioe.getMessage().toLowerCase( Locale.ENGLISH ).indexOf("all pipe instances are busy") >= 0) {
                     // Per a Microsoft knowledgebase article, wait 200 ms to 1 second each time
                     // we get an "All pipe instances are busy" error.
                     // http://support.microsoft.com/default.aspx?scid=KB;EN-US;165189
@@ -557,7 +558,7 @@ public class JtdsConnection implements java.sql.Connection {
 
 
     /**
-     * Retrive the shared socket.
+     * Retrieve the shared socket.
      *
      * @return The <code>SharedSocket</code> object.
      */
@@ -591,7 +592,7 @@ public class JtdsConnection implements java.sql.Connection {
      * @return the next temporary SP name as a <code>String</code>
      */
     String getProcName() {
-        String seq = "000000" + Integer.toHexString(spSequenceNo++).toUpperCase();
+        String seq = "000000" + Integer.toHexString(spSequenceNo++).toUpperCase( Locale.ENGLISH );
 
         return "#jtds" + seq.substring(seq.length() - 6, seq.length());
     }
@@ -602,7 +603,7 @@ public class JtdsConnection implements java.sql.Connection {
      * @return the next cursor name as a <code>String</code>
      */
     synchronized String getCursorName() {
-        String seq = "000000" + Integer.toHexString(cursorSequenceNo++).toUpperCase();
+        String seq = "000000" + Integer.toHexString(cursorSequenceNo++).toUpperCase( Locale.ENGLISH );
 
         return "_jtds" + seq.substring(seq.length() - 6, seq.length());
     }
@@ -1211,7 +1212,7 @@ public class JtdsConnection implements java.sql.Connection {
         //note:mdb in certain cases (e.g. NTLMv2) the domain name must be
         //  all upper case for things to work.
         if( domainName != null )
-            domainName = domainName.toUpperCase();
+            domainName = domainName.toUpperCase( Locale.ENGLISH );
 
         Integer parsedTdsVersion =
                 DefaultProperties.getTdsVersion(info.getProperty(Messages.get(Driver.TDS)));
@@ -1389,7 +1390,7 @@ public class JtdsConnection implements java.sql.Connection {
     /**
      * Retrieve the sendParametersAsUnicode flag.
      *
-     * @return <code>boolean</code> true if parameters should be sent as unicode.
+     * @return <code>boolean</code> true if parameters should be sent as Unicode.
      */
     protected boolean getUseUnicode() {
         return useUnicode;
@@ -1580,7 +1581,7 @@ public class JtdsConnection implements java.sql.Connection {
     }
 
     /**
-     * Called by the protcol to change the current database context.
+     * Called by the protocol to change the current database context.
      *
      * @param newDb The new database selected on the server.
      * @param oldDb The old database as known by the server.

@@ -966,7 +966,7 @@ public class PreparedStatementTest extends TestBase {
    public void testPrepareFailWarning() throws SQLException
    {
       // preparation succeeds in SQL server 2008 and above (what about Sybase?)
-      if( con.getMetaData().getURL().toLowerCase().contains( "microsoft" ) && con.getMetaData().getDatabaseMajorVersion() < 10 )
+      if( con.getMetaData().getURL().toLowerCase( Locale.ENGLISH ).contains( "microsoft" ) && con.getMetaData().getDatabaseMajorVersion() < 10 )
       {
          try
          {
