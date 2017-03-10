@@ -26,6 +26,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.HashSet;
@@ -55,7 +56,7 @@ import net.sourceforge.jtds.util.*;
  *
  * @author Mike Hutchinson
  * @author Alin Sinpalean
- * @version $Id: JtdsConnection.java,v 1.119.2.14 2010-05-17 10:27:00 ickzon Exp $
+ * @author Holger Rehn
  */
 public class JtdsConnection implements java.sql.Connection {
     /**
@@ -151,7 +152,7 @@ public class JtdsConnection implements java.sql.Connection {
     /** The minor version number eg 92. */
     private int databaseMinorVersion;
     /** True if this connection is closed. */
-    private boolean closed;
+    private volatile boolean closed;
     /** True if this connection is read only. */
     private boolean readOnly;
     /** List of statements associated with this connection. */
@@ -159,7 +160,7 @@ public class JtdsConnection implements java.sql.Connection {
     /** Default transaction isolation level. */
     private int transactionIsolation = java.sql.Connection.TRANSACTION_READ_COMMITTED;
     /** Default auto commit state. */
-    private boolean autoCommit = true;
+    private volatile boolean autoCommit = true;
     /** Diagnostc messages for this connection. */
     private final SQLDiagnostic messages;
     /** Connection's current rowcount limit. */
@@ -236,12 +237,14 @@ public class JtdsConnection implements java.sql.Connection {
     private boolean useJCIFS;
     /** When doing NTLM authentication, send NTLMv2 response rather than regular response */
     private boolean useNTLMv2 = false;
+    /** Force Kerberos authentication */
+    private boolean useKerberos = false;
 
     /** the number of currently open connections */
     private static int[] connections = new int[1];
     /** The list of savepoints. */
     private ArrayList savepoints;
-    /** Maps each savepoint to a list of tmep procedures created since the savepoint */
+    /** Maps each savepoint to a list of temp procedures created since the savepoint */
     private Map savepointProcInTran;
     /** Counter for generating unique savepoint identifiers */
     private int savepointId;
@@ -522,7 +525,7 @@ public class JtdsConnection implements java.sql.Connection {
             catch (IOException ioe) {
                 exceptionCount++;
                 lastIOException = ioe;
-                if (ioe.getMessage().toLowerCase().indexOf("all pipe instances are busy") >= 0) {
+                if (ioe.getMessage().toLowerCase( Locale.ENGLISH ).indexOf("all pipe instances are busy") >= 0) {
                     // Per a Microsoft knowledgebase article, wait 200 ms to 1 second each time
                     // we get an "All pipe instances are busy" error.
                     // http://support.microsoft.com/default.aspx?scid=KB;EN-US;165189
@@ -555,7 +558,7 @@ public class JtdsConnection implements java.sql.Connection {
 
 
     /**
-     * Retrive the shared socket.
+     * Retrieve the shared socket.
      *
      * @return The <code>SharedSocket</code> object.
      */
@@ -589,7 +592,7 @@ public class JtdsConnection implements java.sql.Connection {
      * @return the next temporary SP name as a <code>String</code>
      */
     String getProcName() {
-        String seq = "000000" + Integer.toHexString(spSequenceNo++).toUpperCase();
+        String seq = "000000" + Integer.toHexString(spSequenceNo++).toUpperCase( Locale.ENGLISH );
 
         return "#jtds" + seq.substring(seq.length() - 6, seq.length());
     }
@@ -600,7 +603,7 @@ public class JtdsConnection implements java.sql.Connection {
      * @return the next cursor name as a <code>String</code>
      */
     synchronized String getCursorName() {
-        String seq = "000000" + Integer.toHexString(cursorSequenceNo++).toUpperCase();
+        String seq = "000000" + Integer.toHexString(cursorSequenceNo++).toUpperCase( Locale.ENGLISH );
 
         return "_jtds" + seq.substring(seq.length() - 6, seq.length());
     }
@@ -953,6 +956,14 @@ public class JtdsConnection implements java.sql.Connection {
         return useNTLMv2;
     }
 
+   /**
+    * Return whether to use Kerberos authentication for MS SQL Server.
+    */
+   boolean getUseKerberos()
+   {
+      return useKerberos;
+   }
+
     /**
      * Retrieves the application name for this connection.
      *
@@ -1196,11 +1207,12 @@ public class JtdsConnection implements java.sql.Connection {
         useJCIFS = parseBooleanProperty(info,Driver.USEJCIFS);
         charsetSpecified = serverCharset.length() > 0;
         useNTLMv2 = parseBooleanProperty(info,Driver.USENTLMV2);
+        useKerberos = parseBooleanProperty(info,Driver.USEKERBEROS);
 
         //note:mdb in certain cases (e.g. NTLMv2) the domain name must be
         //  all upper case for things to work.
         if( domainName != null )
-            domainName = domainName.toUpperCase();
+            domainName = domainName.toUpperCase( Locale.ENGLISH );
 
         Integer parsedTdsVersion =
                 DefaultProperties.getTdsVersion(info.getProperty(Messages.get(Driver.TDS)));
@@ -1378,7 +1390,7 @@ public class JtdsConnection implements java.sql.Connection {
     /**
      * Retrieve the sendParametersAsUnicode flag.
      *
-     * @return <code>boolean</code> true if parameters should be sent as unicode.
+     * @return <code>boolean</code> true if parameters should be sent as Unicode.
      */
     protected boolean getUseUnicode() {
         return useUnicode;
@@ -1569,7 +1581,7 @@ public class JtdsConnection implements java.sql.Connection {
     }
 
     /**
-     * Called by the protcol to change the current database context.
+     * Called by the protocol to change the current database context.
      *
      * @param newDb The new database selected on the server.
      * @param oldDb The old database as known by the server.
@@ -1633,68 +1645,80 @@ public class JtdsConnection implements java.sql.Connection {
         }
     }
 
-    /**
-     * Removes a statement object from the list maintained by the connection
-     * and cleans up the statement cache if necessary.
-     * <p>
-     * Synchronized because it accesses the statement list, the statement cache
-     * and the <code>baseTds</code>.
-     *
-     * @param statement the statement to remove
-     */
-    synchronized void removeStatement(JtdsStatement statement)
-            throws SQLException {
-        // Remove the JtdsStatement from the statement list
-        synchronized (statements) {
-            for (int i = 0; i < statements.size(); i++) {
-                WeakReference wr = (WeakReference) statements.get(i);
+   /**
+    * <p> Removes a statement object from the list maintained by the connection
+    * and cleans up the statement cache if necessary. </p>
+    *
+    * <p> Synchronized because it accesses the statement list, the statement
+    * cache and the <code>baseTds</code>. </p>
+    *
+    * @param statement
+    *    statement to remove
+    */
+   synchronized void removeStatement( JtdsStatement statement )
+      throws SQLException
+   {
+      // Remove the JtdsStatement from the statement list
+      synchronized( statements )
+      {
+         for( int i = 0; i < statements.size(); i++ )
+         {
+            WeakReference wr = (WeakReference) statements.get( i );
 
-                if (wr != null) {
-                    Statement stmt = (Statement) wr.get();
+            if( wr != null )
+            {
+               Statement stmt = (Statement) wr.get();
 
-                    // Remove the statement if found but also remove all
-                    // statements that have already been garbage collected
-                    if (stmt == null || stmt == statement) {
-                        statements.set(i, null);
-                    }
-                }
+               // Remove the statement if found but also remove all
+               // statements that have already been garbage collected
+               if( stmt == null || stmt == statement )
+               {
+                  statements.set( i, null );
+               }
             }
-        }
+         }
+      }
 
-        if (statement instanceof JtdsPreparedStatement) {
-            // Clean up the prepared statement cache; getObsoleteHandles will
-            // decrement the usage count for the set of used handles
-            Collection handles = statementCache.getObsoleteHandles(
-                                          ((JtdsPreparedStatement) statement).handles);
+      if( statement instanceof JtdsPreparedStatement )
+      {
+         // Clean up the prepared statement cache; getObsoleteHandles will
+         // decrement the usage count for the set of used handles
+         Collection handles = statementCache.getObsoleteHandles( ((JtdsPreparedStatement) statement).handles );
 
-            if (handles != null) {
-                if (serverType == Driver.SQLSERVER) {
-                    // SQL Server unprepare
-                    StringBuilder cleanupSql = new StringBuilder(handles.size() * 32);
-                    for (Iterator iterator = handles.iterator(); iterator.hasNext(); ) {
-                        ProcEntry pe = (ProcEntry) iterator.next();
-                        // Could get put back if in a transaction that is
-                        // rolled back
-                        pe.appendDropSQL(cleanupSql);
-                    }
-                    if (cleanupSql.length() > 0) {
-                        baseTds.executeSQL(cleanupSql.toString(), null, null, true, 0,
-                                            -1, -1, true);
-                        baseTds.clearResponseQueue();
-                    }
-                } else {
-                    // Sybase unprepare
-                    for (Iterator iterator = handles.iterator(); iterator.hasNext(); ) {
-                        ProcEntry pe = (ProcEntry)iterator.next();
-                        if (pe.toString() != null) {
-                            // Remove the Sybase light weight proc
-                            baseTds.sybaseUnPrepare(pe.toString());
-                        }
-                    }
-                }
+         if( handles != null )
+         {
+            if( serverType == Driver.SQLSERVER )
+            {
+               // SQL Server unprepare
+               StringBuilder cleanupSql = new StringBuilder( handles.size() * 32 );
+               for( Iterator iterator = handles.iterator(); iterator.hasNext(); )
+               {
+                  ProcEntry pe = (ProcEntry) iterator.next();
+                  // Could get put back if in a transaction that is rolled back
+                  pe.appendDropSQL( cleanupSql );
+               }
+               if( cleanupSql.length() > 0 )
+               {
+                  baseTds.executeSQL( cleanupSql.toString(), null, null, true, 0, -1, -1, true );
+                  baseTds.clearResponseQueue();
+               }
             }
-        }
-    }
+            else
+            {
+               // Sybase unprepare
+               for( Iterator iterator = handles.iterator(); iterator.hasNext(); )
+               {
+                  ProcEntry pe = (ProcEntry) iterator.next();
+                  if( pe.toString() != null )
+                  {
+                     // Remove the Sybase light weight proc
+                     baseTds.sybaseUnPrepare( pe.toString() );
+                  }
+               }
+            }
+         }
+      }
+   }
 
     /**
      * Adds a statement object to the list maintained by the connection.
@@ -1855,8 +1879,7 @@ public class JtdsConnection implements java.sql.Connection {
         //
         // Execute our extended stored procedure (let's hope it is installed!).
         //
-        baseTds.executeSQL(null, "master..xp_jtdsxa", params, false, 0, -1, -1,
-                true);
+        baseTds.executeSQL(null, "master..xp_jtdsxa", params, false, 0, -1, -1, true);
         //
         // Now process results
         //
@@ -1963,30 +1986,40 @@ public class JtdsConnection implements java.sql.Connection {
         return xaEmulation;
     }
 
-    /**
-     * Retrieves the connection mutex and acquires an exclusive lock on the
-     * network connection.
-     *
-     * @return the mutex object as a <code>Semaphore</code>
-     */
-    Semaphore getMutex() {
-        // Thread.interrupted() will clear the interrupt status
-        boolean interrupted = Thread.interrupted();
+   /**
+    * Retrieves the connection mutex and acquires an exclusive lock on the
+    * network connection.
+    *
+    * @return
+    *    the mutex object as a <code>Semaphore</code>
+    */
+   Semaphore getMutex()
+   {
+      boolean interrupted = false;
 
-        try {
+      while( true )
+      {
+         // JDBC can not be interrupted, retry on InterruptedException
+         try
+         {
             mutex.acquire();
-        } catch (InterruptedException e) {
-            throw new IllegalStateException("Thread execution interrupted");
-        }
+            break;
+         }
+         catch( InterruptedException e )
+         {
+            // interrupt status is cleared now
+            interrupted = true;
+         }
+      }
 
-        if (interrupted) {
-            // Bug [1596743] do not absorb interrupt status
-            Thread.currentThread().interrupt();
-        }
+      // Bug [1596743] do not absorb interrupt status
+      if( interrupted )
+      {
+         Thread.currentThread().interrupt();
+      }
 
-        return mutex;
+      return mutex;
     }
-
 
    /**
     * Releases (either closes or caches) a <code>TdsCore</code>.
@@ -2162,15 +2195,18 @@ public class JtdsConnection implements java.sql.Connection {
         clearSavepoints();
     }
 
-    synchronized public boolean getAutoCommit() throws SQLException {
-        checkOpen();
+   public boolean getAutoCommit()
+      throws SQLException
+   {
+      checkOpen();
+      return autoCommit;
+   }
 
-        return autoCommit;
-    }
-
-    public boolean isClosed() throws SQLException {
-        return closed;
-    }
+   public boolean isClosed()
+      throws SQLException
+   {
+      return closed;
+   }
 
     public boolean isReadOnly() throws SQLException {
         checkOpen();
@@ -2516,35 +2552,54 @@ public class JtdsConnection implements java.sql.Connection {
         return prepareStatement(sql, JtdsStatement.RETURN_GENERATED_KEYS);
     }
 
-    /**
-     * Add a savepoint to the list maintained by this connection.
-     *
-     * @param savepoint The savepoint object to add.
-     * @throws SQLException
-     */
-    private void setSavepoint(SavepointImpl savepoint) throws SQLException {
-        Statement statement = null;
+   /**
+    * Add a savepoint to the list maintained by this connection.
+    *
+    * @param savepoint
+    *    The savepoint object to add.
+    *
+    * @throws SQLException
+    */
+   private void setSavepoint( SavepointImpl savepoint )
+      throws SQLException
+   {
+      Statement statement = null;
 
-        try {
-            statement = createStatement();
-            statement.execute("IF @@TRANCOUNT=0 BEGIN "
-                    + "SET IMPLICIT_TRANSACTIONS OFF; " + "BEGIN TRAN; " // Fix for bug []Patch: in SET IMPLICIT_TRANSACTIONS ON
-                    + "SET IMPLICIT_TRANSACTIONS ON; " + "END "          // mode BEGIN TRAN actually starts two transactions!
-                    + "SAVE TRAN jtds" + savepoint.getId());
-        } finally {
-            if (statement != null) {
-                statement.close();
-            }
-        }
+      try
+      {
+         statement = createStatement();
 
-        synchronized (this) {
-            if (savepoints == null) {
-                savepoints = new ArrayList();
-            }
+         if( serverType == Driver.SYBASE )
+         {
+            statement.execute( "IF @@TRANCOUNT=0 BEGIN TRAN "
+                             + "SAVE TRAN jtds" + savepoint.getId() );
+         }
+         else
+         {
+            statement.execute( "IF @@TRANCOUNT=0 BEGIN "
+                             + "SET IMPLICIT_TRANSACTIONS OFF; BEGIN TRAN; " // Fix for bug #569: in "SET IMPLICIT_TRANSACTIONS ON" mode
+                             + "SET IMPLICIT_TRANSACTIONS ON; END "          // (auto-commit), "BEGIN TRAN" actually starts two transactions!
+                             + "SAVE TRAN jtds" + savepoint.getId() );
+         }
+      }
+      finally
+      {
+         if( statement != null )
+         {
+            statement.close();
+         }
+      }
 
-            savepoints.add(savepoint);
-        }
-    }
+      synchronized( this )
+      {
+         if( savepoints == null )
+         {
+            savepoints = new ArrayList();
+         }
+
+         savepoints.add(savepoint);
+      }
+   }
 
     /**
      * Releases all savepoints. Used internally when committing or rolling back

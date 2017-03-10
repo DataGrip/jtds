@@ -82,7 +82,7 @@ public class JtdsCallableStatement extends JtdsPreparedStatement implements Call
         throws SQLException {
         checkOpen();
 
-        // no need to force the user to care for the param syntax
+        // no need to force the user to care about the param syntax
         if(! name.startsWith( "@" ))
            name = "@" + name;
 
@@ -139,87 +139,119 @@ public class JtdsCallableStatement extends JtdsPreparedStatement implements Call
         }
     }
 
-    /**
-     * Execute the SQL batch on a MS server.
-     * @param size the total size of the batch.
-     * @param executeSize the maximum number of statements to send in one request.
-     * @param counts the returned update counts.
-     * @return Chained exceptions linked to a <code>SQLException</code>.
-     * @throws SQLException
-     */
-    @Override
-   protected SQLException executeMSBatch(int size, int executeSize, ArrayList counts)
-    throws SQLException {
-        if (parameters.length == 0) {
-            // No parameters so we can execute as a simple batch
-            return super.executeMSBatch(size, executeSize, counts);
-        }
-        SQLException sqlEx = null;
-        for (int i = 0; i < size;) {
-            Object value = batchValues.get(i);
-            ++i;
-            // Execute batch now if max size reached or end of batch
-            boolean executeNow = (i % executeSize == 0) || i == size;
+   /**
+    * Execute the SQL batch on a MS server.
+    *
+    * @param size
+    *    total size of the batch
+    *
+    * @param executeSize
+    *    maximum number of statements to send in one request
+    *
+    * @param counts
+    *    the returned update counts
+    *
+    * @return
+    *    chained exceptions linked to a <code>SQLException</code>
+    *
+    * @throws SQLException
+    */
+   @Override
+   protected SQLException executeMSBatch( int size, int executeSize, ArrayList counts )
+      throws SQLException
+   {
+      if( parameters.length == 0 )
+      {
+         // No parameters so we can execute as a simple batch
+         return super.executeMSBatch( size, executeSize, counts );
+      }
 
-            tds.startBatch();
-            tds.executeSQL(sql, procName, (ParamInfo[]) value, false, 0, -1, -1, executeNow);
+      SQLException sqlEx = null;
+      for( int i = 0; i < size; )
+      {
+         Object value = batchValues.get( i );
+         ++ i;
 
-            // If the batch has been sent, process the results
-            if (executeNow) {
-                sqlEx = tds.getBatchCounts(counts, sqlEx);
+         // Execute batch now if max size reached or end of batch
+         boolean executeNow = (i % executeSize == 0) || i == size;
 
-                // If a serious error then we stop execution now as count
-                // is too small.
-                if (sqlEx != null && counts.size() != i) {
-                    break;
-                }
-            }
-        }
-        return sqlEx;
-    }
+         tds.startBatch();
 
-    /**
-     * Execute the SQL batch on a Sybase server.
-     * <p/>
-     * For the rare case of CallableStatement batches each statement is executed individually. This ensures that
-     * problems with the server reading into the middle of a statement are avoided. See bug report [1374518] for more
-     * details.
-     *
-     * @param size        the total size of the batch
-     * @param executeSize the maximum number of statements to send in one request (ignored for this version of the
-     *                    method as only one statement will be sent at a time)
-     * @param counts the returned update counts
-     * @return chained exceptions linked to a <code>SQLException</code>
-     * @throws SQLException if a serious error occurs during execution
-     */
-    @Override
-   protected SQLException executeSybaseBatch(int size, int executeSize, ArrayList counts)
-    throws SQLException
-    {
-        if (parameters.length == 0) {
-            // No parameters so we can execute as a simple batch
-            return super.executeSybaseBatch(size, executeSize, counts);
-        }
+         // provide statement's ROWCOUNT and TEXTSIZE (see bug #726)
+         tds.executeSQL( sql, procName, (ParamInfo[]) value, false, 0, maxRows, maxFieldSize, executeNow );
 
-        SQLException sqlEx = null;
-
-        for (int i = 0; i < size;) {
-            Object value = batchValues.get(i);
-            ++i;
-            tds.executeSQL(sql, procName, (ParamInfo[]) value, false, 0, -1, -1, true);
-
-            // If the batch has been sent, process the results
-            sqlEx = tds.getBatchCounts(counts, sqlEx);
+         // If the batch has been sent, process the results
+         if( executeNow )
+         {
+            sqlEx = tds.getBatchCounts( counts, sqlEx );
 
             // If a serious error then we stop execution now as count
             // is too small.
-            if (sqlEx != null && counts.size() != i) {
-                break;
+            if( sqlEx != null && counts.size() != i )
+            {
+               break;
             }
-        }
-        return sqlEx;
-    }
+         }
+      }
+      return sqlEx;
+   }
 
+   /**
+    * <p> Execute the SQL batch on a Sybase server. </p>
+    *
+    * <p> For the rare case of CallableStatement batches each statement is
+    * executed individually. This ensures that problems with the server reading
+    * into the middle of a statement are avoided. See bug report [1374518] for
+    * more details. </p>
+    *
+    * @param size
+    *    total size of the batch
+    *
+    * @param executeSize
+    *    maximum number of statements to send in one request (ignored for this
+    *    version of the method as only one statement will be sent at a time)
+    *
+    * @param counts
+    *    returned update counts
+    *
+    * @return
+    *    chained exceptions linked to a <code>SQLException</code>
+    *
+    * @throws SQLException
+    *    if a serious error occurs during execution
+    */
+   @Override
+   protected SQLException executeSybaseBatch( int size, int executeSize, ArrayList counts )
+      throws SQLException
+   {
+      if( parameters.length == 0 )
+      {
+         // no parameters so we can execute as a simple batch
+         return super.executeSybaseBatch( size, executeSize, counts );
+      }
+
+      SQLException sqlEx = null;
+
+      for( int i = 0; i < size; )
+      {
+         Object value = batchValues.get( i );
+         ++ i;
+
+         // provide statement's ROWCOUNT and TEXTSIZE (see bug #726)
+         tds.executeSQL( sql, procName, (ParamInfo[]) value, false, 0, maxRows, maxFieldSize, true );
+
+         // If the batch has been sent, process the results
+         sqlEx = tds.getBatchCounts( counts, sqlEx );
+
+         // If a serious error then we stop execution now as count is too small.
+         if( sqlEx != null && counts.size() != i )
+         {
+            break;
+         }
+      }
+
+      return sqlEx;
+   }
 
 // ---------- java.sql.CallableStatement methods follow ----------
 

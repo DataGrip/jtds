@@ -20,6 +20,7 @@ package net.sourceforge.jtds.jdbcx;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.Locale;
 
 import javax.naming.Context;
 import javax.naming.Name;
@@ -28,6 +29,7 @@ import javax.naming.Reference;
 import javax.naming.spi.ObjectFactory;
 
 import net.sourceforge.jtds.jdbc.Driver;
+import net.sourceforge.jtds.jdbc.Messages;
 
 /**
  * Description
@@ -91,6 +93,7 @@ public class JtdsObjectFactory implements ObjectFactory
             Driver.USECURSORS,
             Driver.USEJCIFS,
             Driver.USENTLMV2,
+            Driver.USEKERBEROS,
             Driver.USELOBS,
             Driver.USER,
             Driver.SENDSTRINGPARAMETERSASUNICODE,
@@ -110,15 +113,17 @@ public class JtdsObjectFactory implements ObjectFactory
       HashMap values = new HashMap();
 
       Enumeration c = ref.getAll();
+
       while( c.hasMoreElements() )
       {
          RefAddr ra = (RefAddr) c.nextElement();
-         values.put( ra.getType().toLowerCase(), ra.getContent() );
+         values.put( ra.getType().toLowerCase( Locale.ENGLISH ), ra.getContent() );
       }
 
       for( int i = 0; i < props.length; i ++ )
       {
-         String value = (String) values.get( props[i].toLowerCase() );
+         String value = (String) values.get( props[i] );
+         value = value == null && props[i] != JtdsDataSource.DESCRIPTION ? (String) values.get( Messages.get( props[i] ).toLowerCase( Locale.ENGLISH ) ) : value;
 
          if( value != null )
          {

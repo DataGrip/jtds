@@ -58,7 +58,7 @@ class DumpThread extends Thread
         String res = Integer.toHexString(value);
         while( res.length() < len )
             res = '0' + res;
-        return res.toUpperCase();
+        return res.toUpperCase( Locale.ENGLISH );
     }
 
     String packetType(int value)

@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 /**
@@ -49,14 +50,17 @@ public class StatementTest extends TestBase
       dropTable( "Bug544b" );
 
       Statement sta = con.createStatement();
-      sta.executeUpdate( "create table Bug544a(A int, B int identity(18,1) not null)" );
+      sta.executeUpdate( "create table Bug544a(A int, B int identity not null)" );
       sta.executeUpdate( "create table Bug544b(A int)" );
+
+      // insert a row to bump up the identity value
+      sta.execute( "insert into Bug544a values( 9 )" );
 
       // create insert trigger
       sta.executeUpdate( "create trigger Bug544T on Bug544a for insert as begin insert into Bug544b values (12) end" );
 
       // insert data to fire the trigger
-      sta.execute( "insert into Bug544a values( 1 ) select SCOPE_IDENTITY()" );
+      sta.execute( "insert into Bug544a values( 1 ) select @@identity" );
 
       // dumpAll( sta );
 
@@ -66,9 +70,9 @@ public class StatementTest extends TestBase
       assertEquals( 1, sta.getUpdateCount() ); // insert executed by the trigger
       assertTrue( sta.getMoreResults() );
 
-      ResultSet res = sta.getResultSet();      // result of SELECT SCOPE_IDENTITY()" );
+      ResultSet res = sta.getResultSet();      // result of "select @@identity"
       assertTrue( res.next() );
-      assertEquals( 18, res.getInt( 1 ) );     // the generated value
+      assertEquals( 2, res.getInt( 1 ) );      // the generated value
       assertFalse( res.next() );
 
       // check the target table
@@ -97,7 +101,7 @@ public class StatementTest extends TestBase
          stmt.executeUpdate( "insert into #Bug500 values(" + i + ")" );
       }
 
-      stmt.executeUpdate( "set SHOWPLAN_ALL on" );
+      stmt.executeUpdate( "set " + ( isMSSQL() ? "SHOWPLAN_ALL" : "SHOWPLAN" ) + " on" );
       // or stmt.execute( "set SHOWPLAN_ALL on" ); - doesn't matters
 
       stmt.execute( "select top 5 * from #Bug500" );
@@ -115,12 +119,12 @@ public class StatementTest extends TestBase
       throws Exception
    {
       Statement sta = con.createStatement();
-      sta.executeUpdate( "create table #Bug528 (A int identity(11,1) not null, B varchar(10))" );
+      sta.executeUpdate( "create table #Bug528 (A int identity, B varchar(10))" );
 
-      boolean result = sta.execute( "insert into #Bug528(B) values ('test');" +  // Update Count: 1
-                                    "insert into #Bug528(B) values ('test');" +  // Update Count: 1
-                                    "select * from #Bug528",                     // ResultSet: [11, test] [12, test]
-                                    Statement.RETURN_GENERATED_KEYS );           // Generated Keys: 12
+      boolean result = sta.execute( "insert into #Bug528(B) values ('test') " +  // Update Count: 1
+                                    "insert into #Bug528(B) values ('test') " +  // Update Count: 1
+                                    "select * from #Bug528",                     // ResultSet: [1, test] [2, test]
+                                    Statement.RETURN_GENERATED_KEYS );           // Generated Keys: 1,2
 
       // dumpAll( sta );
 
@@ -133,10 +137,10 @@ public class StatementTest extends TestBase
       // get and check resultset
       ResultSet res = sta.getResultSet();
       assertTrue( res.next() );
-      assertEquals( 11, res.getInt( 1 ) );
+      assertEquals( 1, res.getInt( 1 ) );
       assertEquals( "test", res.getString( 2 ) );
       assertTrue( res.next() );
-      assertEquals( 12, res.getInt( 1 ) );
+      assertEquals( 2, res.getInt( 1 ) );
       assertEquals( "test", res.getString( 2 ) );
       assertFalse( res.next() );
 
@@ -144,9 +148,9 @@ public class StatementTest extends TestBase
       res = sta.getGeneratedKeys();
    // FIXME: the driver is not yet able to return generated keys for anything but the last update
    // assertTrue( res.next() );
-   // assertEquals( 11, res.getInt( 1 ) );
+   // assertEquals( 1, res.getInt( 1 ) );
       assertTrue( res.next() );
-      assertEquals( 12, res.getInt( 1 ) );
+      assertEquals( 2, res.getInt( 1 ) );
       assertFalse( res.next() );
 
       sta.close();
@@ -170,7 +174,7 @@ public class StatementTest extends TestBase
       catch( SQLException e )
       {
          // expected, executeUpdate() cannot return a resultset
-         assertTrue( e.getMessage().toLowerCase().contains( "executeupdate" ) );
+         assertTrue( e.getMessage().toLowerCase( Locale.ENGLISH ).contains( "executeupdate" ) );
       }
 
       st.close();
@@ -462,8 +466,8 @@ public class StatementTest extends TestBase
          assertEquals( i == expected.length -1 ? false : true, sta.getMoreResults() );
       }
 
-      // no update count expected
-      assertEquals( -1, sta.getUpdateCount() );
+      // no update count expected for MSSQL, Sybase seems to sum up the inserts and computed rows to a total of 157
+      assertEquals( isMSSQL() ? -1 : 157, sta.getUpdateCount() );
       sta.close();
    }
 
@@ -781,23 +785,25 @@ public class StatementTest extends TestBase
      */
     public void testQueryTimeout() throws Exception
     {
+       dropProcedure( "testTimeout" );
+
        Statement st = con.createStatement();
        st.setQueryTimeout( 1 );
 
-       st.execute( "create procedure #testTimeout as begin waitfor delay '00:00:30'; select 1; end" );
+       st.execute( "create procedure testTimeout as begin waitfor delay '00:00:30' select 1 end" );
 
        long start = System.currentTimeMillis();
 
        try
        {
           // this query doesn't use a cursor
-          st.executeQuery( "exec #testTimeout" );
+          st.executeQuery( "exec testTimeout" );
           fail( "query did not time out" );
        }
        catch( SQLException e )
        {
           assertEquals( "HYT00", e.getSQLState() );
-          assertEquals( 1000, System.currentTimeMillis() - start, 50 );
+          assertEquals( 1000, System.currentTimeMillis() - start, 1000 );
        }
 
        st.execute( "create table #dummy1(A varchar(200))" );
@@ -825,7 +831,7 @@ public class StatementTest extends TestBase
        catch( SQLException e )
        {
           assertEquals( "HYT00", e.getSQLState() );
-          assertEquals( 1000, System.currentTimeMillis() - start, 100 );
+          assertEquals( 1000, System.currentTimeMillis() - start, 1000 );
        }
 
        st.close();

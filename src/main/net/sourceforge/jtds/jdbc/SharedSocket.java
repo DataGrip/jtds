@@ -25,9 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.Socket;
 import java.net.SocketException;
@@ -151,13 +149,12 @@ class SharedSocket {
      * The directory to buffer data to.
      */
     private final File bufferDir;
-    /**
-     * Total memory usage in all instances of the driver
-     * NB. Access to this field should probably be synchronized
-     * but in practice lost updates will not matter much and I think
-     * all VMs tend to do atomic saves to integer variables.
-     */
-    private static int globalMemUsage;
+
+   /**
+    * total memory usage in all instances of the driver
+    */
+   private static AtomicInteger                       _MemUsage       = new AtomicInteger();
+
     /**
      * Peak memory usage for debug purposes.
      */
@@ -258,67 +255,38 @@ class SharedSocket {
         socket.setKeepAlive(connection.getSocketKeepAlive());
     }
 
-    /**
-     * Creates a {@link Socket} through reflection when {@link Driver#JDBC3}
-     * is <code>true</code>.  Reflection must be used to stay compatible
-     * with JDK 1.3.
-     *
-     * @param connection the connection object
-     * @return a socket open to the host and port with the given timeout
-     * @throws IOException if socket open fails
-     */
-    private Socket createSocketForJDBC3(JtdsConnection connection) throws IOException {
-        final String host = connection.getServerName();
-        final int port = connection.getPortNumber();
-        final int loginTimeout = connection.getLoginTimeout();
-        final String bindAddress = connection.getBindAddress();
-        try {
-            // Create the Socket
-            Constructor socketConstructor =
-                    Socket.class.getConstructor(new Class[] {});
-            Socket socket =
-                    (Socket) socketConstructor.newInstance(new Object[] {});
+   /**
+    * Creates a {@link Socket} connection.
+    *
+    * @param connection
+    *    the connection object
+    *
+    * @return
+    *    a socket open to the host and port with the given timeout
+    *
+    * @throws IOException
+    *    if socket open fails
+    */
+   private Socket createSocketForJDBC3( JtdsConnection connection ) throws IOException
+   {
+      final String host = connection.getServerName();
+      final int port = connection.getPortNumber();
+      final String bindAddress = connection.getBindAddress();
+      final int loginTimeout = connection.getLoginTimeout();
 
-            // Create the InetSocketAddress
-            Constructor constructor = Class.forName("java.net.InetSocketAddress")
-                    .getConstructor(new Class[] {String.class, int.class});
-            Object address = constructor.newInstance(
-                            new Object[] {host, new Integer(port)});
+      Socket socket = new Socket();
+      InetSocketAddress address = new InetSocketAddress( host, port );
 
-            // Call Socket.bind(SocketAddress) if bindAddress parameter is set
-            if (bindAddress != null && bindAddress.length() > 0) {
-                Object localBindAddress = constructor.newInstance(
-                        new Object[]{bindAddress, new Integer(0)});
-                Method bind = Socket.class.getMethod(
-                        "bind", new Class[]{Class.forName("java.net.SocketAddress")});
-                bind.invoke(socket, new Object[]{localBindAddress});
-            }
+      // call Socket.bind(SocketAddress) if bindAddress parameter is set
+      if( bindAddress != null && ! bindAddress.isEmpty() )
+      {
+         socket.bind( new InetSocketAddress( bindAddress, 0 ) );
+      }
 
-            // Call Socket.connect(InetSocketAddress, int)
-            Method connect = Socket.class.getMethod("connect", new Class[]
-                    {Class.forName("java.net.SocketAddress"), int.class});
-            connect.invoke(socket,
-                    new Object[] {address, new Integer(loginTimeout * 1000)});
-
-            return socket;
-        } catch (InvocationTargetException ite) {
-            // Reflection was OK but invocation of socket.bind() or socket.connect()
-            // has failed. Try to report the underlying reason
-            Throwable cause = ite.getTargetException();
-            if (cause instanceof IOException) {
-                // OK was an IOException or subclass so just throw it
-                throw (IOException) cause;
-            }
-            // Something else so return invocation exception anyway
-            // (This should not normally occur)
-            throw (IOException) Support.linkException(
-                    new IOException("Could not create socket"), cause);
-        } catch (Exception e) {
-            // Reflection has failed for some reason e.g. security so
-            // try to create a socket in the old way.
-            return new Socket(host, port);
-        }
-    }
+      // establish connection
+      socket.connect( address, loginTimeout * 1000 );
+      return socket;
+   }
 
    String getMAC()
    {
@@ -671,7 +639,7 @@ class SharedSocket {
      * @return
      *    the same buffer received if emptied or another buffer w/ the same size
      *    if the incoming buffer is cached (to avoid copying)
-     *   
+     *
      * @throws
      *    IOException if an I/O error occurs
      */
@@ -763,108 +731,130 @@ class SharedSocket {
         }
     }
 
-    /**
-     * Save a packet buffer in a memory queue or to a disk queue if the global
-     * memory limit for the driver has been exceeded.
-     *
-     * @param vsock  the virtual socket owning this data
-     * @param buffer the data to queue
-     */
-    private void enqueueInput(VirtualSocket vsock, byte[] buffer)
-            throws IOException {
-        //
-        // Check to see if we should start caching to disk
-        //
-        if (globalMemUsage + buffer.length > memoryBudget &&
-                vsock.pktQueue.size() >= minMemPkts &&
-                !securityViolation &&
-                vsock.diskQueue == null) {
-            // Try to create a disk file for the queue
-            try {
-                vsock.queueFile = File.createTempFile("jtds", ".tmp", bufferDir);
-                // vsock.queueFile.deleteOnExit(); memory leak, see http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6664633
-                vsock.diskQueue = new RandomAccessFile(vsock.queueFile, "rw");
+   /**
+    * <p> Save a packet buffer in a memory queue or to a disk queue if the
+    * global memory limit for the driver has been exceeded. </p>
+    *
+    * @param vsock
+    *    the virtual socket owning this data
+    *
+    * @param buffer
+    *    the data to queue
+    */
+   private void enqueueInput( VirtualSocket vsock, byte[] buffer )
+      throws IOException
+   {
+      // check to see if we should start caching to disk
+      if( _MemUsage.get() + buffer.length > memoryBudget && vsock.pktQueue.size() >= minMemPkts && !securityViolation && vsock.diskQueue == null )
+      {
+         // try to create a disk file for the queue
+         try
+         {
+            vsock.queueFile = File.createTempFile( "jtds", ".tmp", bufferDir );
+            // vsock.queueFile.deleteOnExit(); memory leak, see http://bugs.java.com/bugdatabase/view_bug.do?bug_id=6664633
+            vsock.diskQueue = new RandomAccessFile( vsock.queueFile, "rw" );
 
-                // Write current cache contents to disk and free memory
-                byte[] tmpBuf;
+            // write current cache contents to disk and free memory
+            byte[] tmpBuf;
 
-                while (vsock.pktQueue.size() > 0) {
-                    tmpBuf = (byte[]) vsock.pktQueue.removeFirst();
-                    vsock.diskQueue.write(tmpBuf, 0, getPktLen(tmpBuf));
-                    vsock.pktsOnDisk++;
-                }
-            } catch (java.lang.SecurityException se) {
-                // Not allowed to cache to disk so carry on in memory
-                securityViolation = true;
-                vsock.queueFile = null;
-                vsock.diskQueue = null;
+            while( vsock.pktQueue.size() > 0 )
+            {
+               tmpBuf = (byte[]) vsock.pktQueue.removeFirst();
+               vsock.diskQueue.write( tmpBuf, 0, getPktLen( tmpBuf ) );
+               vsock.pktsOnDisk ++;
             }
-        }
+         }
+         catch( java.lang.SecurityException se )
+         {
+            // not allowed to cache to disk so carry on in memory
+            securityViolation = true;
+            vsock.queueFile = null;
+            vsock.diskQueue = null;
+         }
+      }
 
-        if (vsock.diskQueue != null) {
-            // Cache file exists so append buffer to it
-            vsock.diskQueue.write(buffer, 0, getPktLen(buffer));
-            vsock.pktsOnDisk++;
-        } else {
-            // Will cache in memory
-            vsock.pktQueue.addLast(buffer);
-            globalMemUsage += buffer.length;
+      if( vsock.diskQueue != null )
+      {
+         // cache file exists so append buffer to it
+         vsock.diskQueue.write( buffer, 0, getPktLen( buffer ) );
+         vsock.pktsOnDisk ++;
+      }
+      else
+      {
+         // will cache in memory
+         vsock.pktQueue.addLast( buffer );
+         int gm = _MemUsage.addAndGet( buffer.length );
 
-            if (globalMemUsage > peakMemUsage) {
-                peakMemUsage = globalMemUsage;
+         if( gm > peakMemUsage )
+         {
+            peakMemUsage = gm;
+         }
+      }
+
+      vsock.inputPkts ++;
+   }
+
+   /**
+    * <p> Read a cached packet from the in memory queue or from a disk based
+    * queue. </p>
+    *
+    * @param vsock
+    *    the virtual socket owning this data
+    *
+    * @return
+    *    a buffer containing the packet
+    */
+   private byte[] dequeueInput( VirtualSocket vsock )
+      throws IOException
+   {
+      byte[] buffer = null;
+
+      if( vsock.pktsOnDisk > 0 )
+      {
+         // data is cached on disk
+         if( vsock.diskQueue.getFilePointer() == vsock.diskQueue.length() )
+         {
+            // first read so rewind() file
+            vsock.diskQueue.seek( 0L );
+         }
+
+         vsock.diskQueue.readFully( hdrBuf, 0, TDS_HDR_LEN );
+
+         int len = getPktLen( hdrBuf );
+
+         buffer = new byte[len];
+         System.arraycopy( hdrBuf, 0, buffer, 0, TDS_HDR_LEN );
+         vsock.diskQueue.readFully( buffer, TDS_HDR_LEN, len - TDS_HDR_LEN );
+         vsock.pktsOnDisk--;
+
+         if( vsock.pktsOnDisk < 1 )
+         {
+            // file now empty so close and delete it
+            try
+            {
+               vsock.diskQueue.close();
+               vsock.queueFile.delete();
             }
-        }
-
-        vsock.inputPkts++;
-    }
-
-    /**
-     * Read a cached packet from the in memory queue or from a disk based queue.
-     *
-     * @param vsock the virtual socket owning this data
-     * @return a buffer containing the packet
-     */
-    private byte[] dequeueInput(VirtualSocket vsock)
-            throws IOException {
-        byte[] buffer = null;
-
-        if (vsock.pktsOnDisk > 0) {
-            // Data is cached on disk
-            if (vsock.diskQueue.getFilePointer() == vsock.diskQueue.length()) {
-                // First read so rewind() file
-                vsock.diskQueue.seek(0L);
+            finally
+            {
+               vsock.queueFile = null;
+               vsock.diskQueue = null;
             }
+         }
+      }
+      else if( vsock.pktQueue.size() > 0 )
+      {
+         buffer = (byte[]) vsock.pktQueue.removeFirst();
+         _MemUsage.addAndGet( -buffer.length );
+      }
 
-            vsock.diskQueue.readFully(hdrBuf, 0, TDS_HDR_LEN);
+      if( buffer != null )
+      {
+         vsock.inputPkts --;
+      }
 
-            int len = getPktLen(hdrBuf);
-
-            buffer = new byte[len];
-            System.arraycopy(hdrBuf, 0, buffer, 0, TDS_HDR_LEN);
-            vsock.diskQueue.readFully(buffer, TDS_HDR_LEN, len - TDS_HDR_LEN);
-            vsock.pktsOnDisk--;
-
-            if (vsock.pktsOnDisk < 1) {
-                // File now empty so close and delete it
-                try {
-                    vsock.diskQueue.close();
-                    vsock.queueFile.delete();
-                } finally {
-                    vsock.queueFile = null;
-                    vsock.diskQueue = null;
-                }
-            }
-        } else if (vsock.pktQueue.size() > 0) {
-            buffer = (byte[]) vsock.pktQueue.removeFirst();
-            globalMemUsage -= buffer.length;
-        }
-
-        if (buffer != null) {
-            vsock.inputPkts--;
-        }
-
-        return buffer;
-    }
+      return buffer;
+   }
 
     /**
      * Read a physical TDS packet from the network.

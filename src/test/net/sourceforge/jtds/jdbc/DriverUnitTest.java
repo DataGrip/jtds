@@ -24,20 +24,20 @@ import net.sourceforge.jtds.jdbc.DefaultProperties;
 import net.sourceforge.jtds.jdbc.Driver;
 import net.sourceforge.jtds.jdbc.Messages;
 import net.sourceforge.jtds.jdbc.TdsCore;
+
 import java.sql.DriverPropertyInfo;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
-
-
 
 /**
  * Unit tests for the {@link Driver} class.
  *
  * @author David D. Kilzer
- * @version $Id: DriverUnitTest.java,v 1.20 2007-07-08 18:08:54 bheineman Exp $
+ * @author Holger Rehn
  */
 public class DriverUnitTest extends UnitTestBase {
 
@@ -66,6 +66,25 @@ public class DriverUnitTest extends UnitTestBase {
         return testSuite;
     }
 
+   /**
+    * Test to ensure that the version reported by the driver matches the JAR
+    * file's name.
+    */
+   public void testDriverVersion()
+      throws Exception
+   {
+      String file = Driver.class.getResource( '/' + Driver.class.getName().replace( '.', '/' ) + ".class" ).toString();
+
+      // only check if jTDS has been loaded from a jar
+      if( file.startsWith( "jar" ) )
+      {
+         // parse path, e.g. jar:file:/lib/jtds-1.3.0.jar!/net/sourceforge/jtds/jdbc/Driver.class
+         file = file.substring( 0, file.indexOf( ".jar!" ) );
+         file = file.substring( file.lastIndexOf( '/' ) + 1 );
+
+         assertEquals( Driver.getVersion(), file.substring( file.lastIndexOf( '-' ) + 1 ) );
+      }
+   }
 
     /**
      * Constructor.
@@ -462,7 +481,7 @@ public class DriverUnitTest extends UnitTestBase {
                                     url.append('=').append(property[j][1]);
                                 }
 
-                                p.put(property[j][0].toUpperCase(), (property[j][1] == null ? "" : property[j][1]));
+                                p.put(property[j][0].toUpperCase( Locale.ENGLISH ), (property[j][1] == null ? "" : property[j][1]));
                             }
 
                             res.put(url.toString(), p);

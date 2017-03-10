@@ -75,9 +75,9 @@ public class CachedResultSet extends JtdsResultSet {
     /** True if this is a local temporary result set. */
     protected final boolean tempResultSet;
     /** Cursor TdsCore object. */
-    protected final TdsCore cursorTds;
+    protected TdsCore cursorTds;
     /** Updates TdsCore object used for positioned updates. */
-    protected final TdsCore updateTds;
+    protected TdsCore updateTds;
     /** Flag to indicate Sybase. */
     protected boolean isSybase;
     /** Fetch size has been changed. */
@@ -172,8 +172,6 @@ public class CachedResultSet extends JtdsResultSet {
         pos           = POS_BEFORE_FIRST;
         tempResultSet = true;
         cursorName    = null;
-        cursorTds     = null;
-        updateTds     = null;
         procName      = null;
         procedureParams = null;
     }
@@ -220,8 +218,6 @@ public class CachedResultSet extends JtdsResultSet {
         pos           = POS_BEFORE_FIRST;
         tempResultSet = true;
         cursorName    = null;
-        cursorTds     = null;
-        updateTds     = null;
         procName      = null;
         procedureParams = null;
         //
@@ -254,8 +250,6 @@ public class CachedResultSet extends JtdsResultSet {
         tempResultSet = true;
         cursorName    = null;
         rowData.add(copyRow(data));
-        cursorTds     = null;
-        updateTds     = null;
         procName      = null;
         procedureParams = null;
     }
@@ -371,9 +365,7 @@ public class CachedResultSet extends JtdsResultSet {
                 }
             }
             cursorSQL.append(sql);
-            cursorTds.executeSQL(cursorSQL.toString(), null, parameters,
-                    false, statement.getQueryTimeout(), statement.getMaxRows(),
-                    statement.getMaxFieldSize(), true);
+            cursorTds.executeSQL(cursorSQL.toString(), null, parameters, false, statement.getQueryTimeout(), statement.getMaxRows(), statement.getMaxFieldSize(), true);
             cursorTds.clearResponseQueue();
             cursorTds.getMessages().checkErrors();
             //
@@ -386,9 +378,7 @@ public class CachedResultSet extends JtdsResultSet {
                 cursorSQL.append(" FOR ").append(cursorName);
             }
             cursorSQL.append("\r\nFETCH ").append(cursorName);
-            cursorTds.executeSQL(cursorSQL.toString(), null, null, false,
-                    statement.getQueryTimeout(), statement.getMaxRows(),
-                    statement.getMaxFieldSize(), true);
+            cursorTds.executeSQL(cursorSQL.toString(), null, null, false, statement.getQueryTimeout(), statement.getMaxRows(), statement.getMaxFieldSize(), true);
             //
             // Check we have a result set
             //
@@ -424,15 +414,11 @@ public class CachedResultSet extends JtdsResultSet {
                 // OK Should have an SQL select statement
                 // append " FOR BROWSE" to obtain table names
                 // NB. We can't use any jTDS temporary stored proc
-                    cursorTds.executeSQL(sql + " FOR BROWSE", null, procedureParams,
-                            false, statement.getQueryTimeout(),
-                            statement.getMaxRows(), statement.getMaxFieldSize(),
-                            true);
+                    cursorTds.executeSQL(sql + " FOR BROWSE", null, procedureParams, false, statement.getQueryTimeout(), statement.getMaxRows(), statement.getMaxFieldSize(), true);
                 while (!cursorTds.getMoreResults() && !cursorTds.isEndOfResponse());
                 if (!cursorTds.isResultSet()) {
                     // Throw exception but queue up any others
-                    SQLException ex = new SQLException(
-                            Messages.get("error.statement.noresult"), "24000");
+                    SQLException ex = new SQLException( Messages.get("error.statement.noresult"), "24000");
                     ex.setNextException(statement.getMessages().exceptions);
                     throw ex;
                 }
@@ -1024,16 +1010,24 @@ public class CachedResultSet extends JtdsResultSet {
          }
      }
 
-     public void close() throws SQLException {
-         if (!closed) {
-             try {
-                 cursorClose();
-             } finally {
-                 closed    = true;
-                 statement = null;
-             }
+   public void close()
+      throws SQLException
+   {
+      if( ! closed )
+      {
+         try
+         {
+            cursorClose();
          }
-     }
+         finally
+         {
+            closed    = true;
+            statement = null;
+            cursorTds = null;
+            updateTds = null;
+         }
+      }
+   }
 
      public void deleteRow() throws SQLException {
          checkOpen();

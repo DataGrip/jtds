@@ -17,15 +17,30 @@
 //
 package net.sourceforge.jtds.jdbc;
 
-import java.io.*;
-import java.sql.*;
-import java.util.Arrays;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
+import java.sql.SQLWarning;
+import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Random;
 
-import net.sourceforge.jtds.ssl.*;
-import net.sourceforge.jtds.util.*;
+import org.ietf.jgss.GSSContext;
+import org.ietf.jgss.GSSException;
+import org.ietf.jgss.GSSManager;
+import org.ietf.jgss.GSSName;
+import org.ietf.jgss.Oid;
+
+import net.sourceforge.jtds.ssl.Ssl;
+import net.sourceforge.jtds.util.Logger;
+import net.sourceforge.jtds.util.SSPIJNIClient;
+import net.sourceforge.jtds.util.TimerThread;
 
 /**
  * This class implements the Sybase / Microsoft TDS protocol.
@@ -34,7 +49,7 @@ import net.sourceforge.jtds.util.*;
  * <ol>
  * <li>This class, together with TdsData, encapsulates all of the TDS specific logic
  *     required by the driver.
- * <li>This is a ground up reimplementation of the TDS protocol and is rather
+ * <li>This is a ground up re-implementation of the TDS protocol and is rather
  *     simpler, and hopefully easier to understand, than the original.
  * <li>The layout of the various Login packets is derived from the original code
  *     and freeTds work, and incorporates changes including the ability to login as a TDS 5.0 user.
@@ -67,12 +82,6 @@ public class TdsCore {
         byte operation;
         /** The update count from a DONE packet. */
         int updateCount;
-        /** The nonce from an NTLM challenge packet. */
-        byte[] nonce;
-        /** NTLM authentication message. */
-        byte[] ntlmMessage;
-        /** target info for NTLM message TODO: I don't need to store these!!! */
-        byte[] ntlmTarget;
         /** The dynamic parameters from the last TDS_DYNAMIC token. */
         ColInfo[] dynamParamInfo;
         /** The dynamic parameter data from the last TDS_DYNAMIC token. */
@@ -224,12 +233,12 @@ public class TdsCore {
     private static final byte TDS_COLFMT_TOKEN      = (byte) 161;  // 0xA1
     /** TDS Table name token. */
     private static final byte TDS_TABNAME_TOKEN     = (byte) 164;  // 0xA4
-    /** TDS Cursor results column infomation token. */
+    /** TDS Cursor results column information token. */
     private static final byte TDS_COLINFO_TOKEN     = (byte) 165;  // 0xA5
-    /** TDS Computed result set names token. */
-    private static final byte TDS_COMP_NAMES_TOKEN  = (byte) 167;  // 0xA7
-    /** TDS Computed result set token. */
-    private static final byte TDS_COMP_RESULT_TOKEN = (byte) 168;  // 0xA8
+    /** TDS Computed result set names token. (TDS_ALTNAME) */
+    private static final byte TDS_ALT_NAMES_TOKEN   = (byte) 167;  // 0xA7
+    /** TDS Computed result set token. (TDS_ALTFMT) */
+    private static final byte TDS_ALT_RESULT_TOKEN  = (byte) 168;  // 0xA8
     /** TDS Order by columns token. */
     private static final byte TDS_ORDER_TOKEN       = (byte) 169;  // 0xA9
     /** TDS error result token. */
@@ -244,7 +253,7 @@ public class TdsCore {
     private static final byte TDS_CONTROL_TOKEN     = (byte) 174;  // 0xAE
     /** TDS Result set data row token. */
     private static final byte TDS_ROW_TOKEN         = (byte) 209;  // 0xD1
-    /** TDS Computed result set data row token. */
+    /** TDS Computed result set data row token. (TDS_ALTROW) */
     private static final byte TDS_ALTROW            = (byte) 211;  // 0xD3
     /** TDS 5.0 parameter value token. */
     private static final byte TDS5_PARAMS_TOKEN     = (byte) 215;  // 0xD7
@@ -416,7 +425,8 @@ public class TdsCore {
     private final SQLDiagnostic messages;
     /** Indicates that this object is closed. */
     private boolean isClosed;
-    /** Flag that indicates if logon() should try to use Windows Single Sign On using SSPI. */
+    /** Flag that indicates if logon() should try to use Windows Single Sign On using SSPI
+     * or Kerberos SSO via Java native GSSAPI. */
     private boolean ntlmAuthSSO;
     /** Indicates that a fatal error has occurred and the connection will close. */
     private boolean fatalError;
@@ -430,6 +440,20 @@ public class TdsCore {
     private boolean cancelPending;
     /** Synchronization monitor for {@link #cancelPending}. */
     private final int[] cancelMonitor = new int[1];
+
+    /**
+     * flag set to {@code true} whenever a TDS_ERROR token is received
+     */
+    private boolean _ErrorReceived;
+
+    /** The nonce from an NTLM challenge packet. */
+    byte[] nonce;
+    /** NTLM authentication message. */
+    byte[] ntlmMessage;
+    /** target info for NTLM message */
+    byte[] ntlmTarget;
+
+    private GSSContext _gssContext;
 
     /**
      * Construct a TdsCore object.
@@ -608,12 +632,22 @@ public class TdsCore {
             }
             nextToken();
 
-            while (!endOfResponse) {
-                if (currentToken.isAuthToken()) {
-                    sendNtlmChallengeResponse(currentToken.nonce, user, password, domain);
-                }
+            while( ! endOfResponse )
+            {
+               if( currentToken.isAuthToken() )
+               {
+                  // If _gssContext exists, we are doing GSS instead of NTLM
+                  if( _gssContext != null )
+                  {
+                     sendGssToken();
+                  }
+                  else
+                  {
+                     sendNtlmChallengeResponse( user, password, domain );
+                  }
+               }
 
-                nextToken();
+               nextToken();
             }
 
             messages.checkErrors();
@@ -888,24 +922,34 @@ public class TdsCore {
         }
     }
 
-    /**
-     * Submit a simple SQL statement to the server and process all output.
-     *
-     * @param sql the statement to execute
-     * @throws SQLException if an error is returned by the server
-     */
-    void submitSQL(String sql) throws SQLException {
-        checkOpen();
-        messages.clearWarnings();
+   /**
+    * <p> Submit a simple SQL statement to the server and discard all output.
+    * </p>
+    *
+    * <p> <b>Warning:</b> The statement is processed without re-setting the
+    * ROWCOUNT. Because ROWCOUNT also affects updates, sending multiple SQL
+    * commands at once might yield unexpected results! </p>
+    *
+    * @param sql
+    *    statement to execute
+    *
+    * @throws SQLException
+    *    if an error is returned by the server
+    */
+   void submitSQL( String sql )
+      throws SQLException
+   {
+      checkOpen();
+      messages.clearWarnings();
 
-        if (sql.length() == 0) {
-            throw new IllegalArgumentException("submitSQL() called with empty SQL String");
-        }
+      if( sql.isEmpty() )
+         throw new IllegalArgumentException( "submitSQL() called with empty SQL String" );
 
-        executeSQL(sql, null, null, false, 0, -1, -1, true);
-        clearResponseQueue();
-        messages.checkErrors();
-    }
+      executeSQL( sql, null, null, false, 0, -1, -1, true );
+      clearResponseQueue();
+
+      messages.checkErrors();
+   }
 
     /**
      * Notifies the <code>TdsCore</code> that a batch is starting. This is so
@@ -944,6 +988,7 @@ public class TdsCore {
                                  boolean sendNow)
             throws SQLException {
         boolean sendFailed = true; // Used to ensure mutex is released.
+        _ErrorReceived = false; // reset error token flag
 
         try {
             //
@@ -1083,7 +1128,7 @@ public class TdsCore {
      * @param resultSetType        value of the resultSetType parameter when
      *                             the Statement was created
      * @param resultSetConcurrency value of the resultSetConcurrency parameter
-     *                             whenthe Statement was created
+     *                             when the Statement was created
      * @return name of the procedure or prepared statement handle.
      * @exception SQLException
      */
@@ -1154,7 +1199,7 @@ public class TdsCore {
                     Support.getParameterDefinitions(params),
                     ParamInfo.UNICODE);
 
-            // Setup sql statemement param
+            // Setup sql statement param
             prepParam[2] = new ParamInfo(Types.LONGVARCHAR,
                     Support.substituteParamMarkers(sql, params),
                     ParamInfo.UNICODE);
@@ -1822,7 +1867,7 @@ public class TdsCore {
         putLoginString(language, 30);  // language
 
         out.write((byte) 1);  // notify on lang change
-        out.write((short) 0);  // security label hierachy
+        out.write((short) 0);  // security label hierarchy
         out.write((byte) 0);  // security encrypted
         out.write(empty, 0, 8);  // security components
         out.write((short) 0);  // security spare
@@ -1893,47 +1938,55 @@ public class TdsCore {
      * @param netPacketSize TDS packet size to use
      * @throws IOException if an I/O error occurs
      */
-    private void sendMSLoginPkt(final String serverName,
-                                final String database,
-                                final String user,
-                                final String password,
-                                final String domain,
-                                final String appName,
-                                final String progName,
-                                final String wsid,
-                                final String language,
-                                final String macAddress,
-                                final int netPacketSize)
-            throws IOException, SQLException {
-        final byte[] empty = new byte[0];
-        boolean ntlmAuth = false;
-        byte[] ntlmMessage = null;
+    private void sendMSLoginPkt( final String serverName, final String database, final String user, final String password, final String domain, final String appName, final String progName, final String wsid, final String language, final String macAddress, final int netPacketSize ) throws IOException, SQLException
+    {
+       ntlmMessage         = null;
 
-        if (user == null || user.length() == 0) {
-            // See if executing on a Windows platform and if so try and
-            // use the single sign on native library.
-            if (Support.isWindowsOS()) {
-                ntlmAuthSSO = true;
-                ntlmAuth = true;
-            } else {
-                throw new SQLException(Messages.get("error.connection.sso"),
-                        "08001");
-            }
-        } else if (domain != null && domain.length() > 0) {
-            // Assume we want to use Windows authentication with
-            // supplied user and password.
-            ntlmAuth = true;
-        }
+       byte[]  empty       = new byte[0];
+       boolean ntlmAuth    = false;
+       boolean useKerberos = connection.getUseKerberos();
 
-        if (ntlmAuthSSO) {
-            try {
-                // Create the NTLM request block using the native library
-                sspiJNIClient = SSPIJNIClient.getInstance();
-                ntlmMessage = sspiJNIClient.invokePrepareSSORequest();
-            } catch (Exception e) {
-                throw new IOException("SSO Failed: " + e.getMessage());
-            }
-        }
+       if( useKerberos || user == null || user.length() == 0 )
+       {
+          ntlmAuthSSO = true;
+          ntlmAuth = true;
+       }
+       else if( domain != null && domain.length() > 0 )
+       {
+          // Assume we want to use Windows authentication with
+          // supplied user and password.
+          ntlmAuth = true;
+       }
+
+       if( ntlmAuthSSO && Support.isWindowsOS() && ! useKerberos )
+       {
+          // See if executing on a Windows platform and if so try and
+          // use the single sign on native library.
+          try
+          {
+             // Create the NTLM request block using the native library
+             sspiJNIClient = SSPIJNIClient.getInstance();
+             ntlmMessage = sspiJNIClient.invokePrepareSSORequest();
+             Logger.println( "Using native SSO library for Windows Authentication." );
+          }
+          catch( Exception e )
+          {
+             throw new IOException( "SSO Failed: " + e.getMessage() );
+          }
+       }
+       else if( ntlmAuthSSO )
+       {
+          // Try Kerberos SSO
+          try
+          {
+             ntlmMessage = createGssToken();
+             Logger.println( "Using Kerberos GSS authentication." );
+          }
+          catch( GSSException gsse )
+          {
+             throw new IOException( "GSS Failed: " + gsse.getMessage() );
+          }
+       }
 
         //mdb:begin-change
         short packSize = (short) (86 + 2 *
@@ -2127,6 +2180,53 @@ public class TdsCore {
         endOfResponse = false;
     }
 
+   /**
+    * Receive a GSS token.
+    *
+    * @throws IOException
+    */
+   private void tdsGssToken()
+      throws IOException
+   {
+      int pktLen = in.readShort();
+
+      ntlmMessage = new byte[pktLen];
+      in.read( ntlmMessage );
+
+      Logger.println( "GSS: Received token (length: " + ntlmMessage.length + ")" );
+   }
+
+   /**
+    * Send the next GSS authentication token.
+    *
+    * @throws IOException
+    */
+   private void sendGssToken()
+      throws IOException
+   {
+      try
+      {
+         byte gssMessage[] = _gssContext.initSecContext( ntlmMessage, 0, ntlmMessage.length );
+
+         if( _gssContext.isEstablished() )
+         {
+            Logger.println( "GSS: Security context established." );
+         }
+
+         if( gssMessage != null )
+         {
+            Logger.println( "GSS: Sending token (length: " + ntlmMessage.length + ")" );
+            out.setPacketType( NTLMAUTH_PKT );
+            out.write( gssMessage );
+            out.flush();
+         }
+      }
+      catch( GSSException e )
+      {
+         throw new IOException( "GSS failure: " + e.getMessage() );
+      }
+   }
+
     /**
      * Send the response to the NTLM authentication challenge.
      * @param nonce The secret to hash with password.
@@ -2135,17 +2235,14 @@ public class TdsCore {
      * @param domain The Windows NT Dommain.
      * @throws java.io.IOException
      */
-    private void sendNtlmChallengeResponse(final byte[] nonce,
-                                           String user,
-                                           final String password,
-                                           String domain)
-            throws java.io.IOException {
+   private void sendNtlmChallengeResponse( String user, final String password, String domain )
+      throws java.io.IOException
+   {
         out.setPacketType(NTLMAUTH_PKT);
 
         // Prepare and Set NTLM Type 2 message appropriately
         // Author: mahi@aztec.soft.net
         if (ntlmAuthSSO) {
-            byte[] ntlmMessage = currentToken.ntlmMessage;
             try {
                 // Create the challenge response using the native library
                 ntlmMessage = sspiJNIClient.invokePrepareSSOSubmit(ntlmMessage);
@@ -2171,7 +2268,7 @@ public class TdsCore {
 
                 lmAnswer = NtlmAuth.answerLmv2Challenge(domain, user, password, nonce, clientNonce);
                 ntAnswer = NtlmAuth.answerNtlmv2Challenge(
-                        domain, user, password, nonce, currentToken.ntlmTarget, clientNonce);
+                        domain, user, password, nonce, ntlmTarget, clientNonce);
             }
             else
             {
@@ -2307,7 +2404,7 @@ public class TdsCore {
                tds7ResultToken();
                break;
             case ALTMETADATA_TOKEN:
-               tdsComputedResultToken();
+               tdsAltResultToken();
                break;
             case TDS_COLNAME_TOKEN:
                tds4ColNamesToken();
@@ -2321,11 +2418,11 @@ public class TdsCore {
             case TDS_COLINFO_TOKEN:
                tdsColumnInfoToken();
                break;
-            case TDS_COMP_NAMES_TOKEN:
-               tdsInvalidToken();
+            case TDS_ALT_NAMES_TOKEN:
+               tds5AltNameToken();
                break;
-            case TDS_COMP_RESULT_TOKEN:
-               tdsInvalidToken();
+            case TDS_ALT_RESULT_TOKEN:
+               tds5AltFormatToken();
                break;
             case TDS_ORDER_TOKEN:
                tdsOrderByToken();
@@ -2347,7 +2444,7 @@ public class TdsCore {
                tdsRowToken();
                break;
             case TDS_ALTROW:
-               tdsComputedRowToken();
+               tdsAltRowToken();
                break;
             case TDS5_PARAMS_TOKEN:
                tds5ParamsToken();
@@ -2368,7 +2465,14 @@ public class TdsCore {
                tds5ParamFmtToken();
                break;
             case TDS_AUTH_TOKEN:
-               tdsNtlmAuthToken();
+               if( _gssContext != null )
+               {
+                  tdsGssToken();
+               }
+               else
+               {
+                  tdsNtlmAuthToken();
+               }
                break;
             case TDS_RESULT_TOKEN:
                tds5ResultToken();
@@ -2851,7 +2955,7 @@ public class TdsCore {
      * @throws IOException
      */
     private void tdsErrorToken()
-    throws IOException
+       throws IOException
     {
         int pktLen = in.readShort(); // Packet length
         int sizeSoFar = 6;
@@ -2877,6 +2981,8 @@ public class TdsCore {
 
         if (currentToken.token == TDS_ERROR_TOKEN)
         {
+           _ErrorReceived = true;
+
             if (severity < 10) {
                 severity = 11; // Ensure treated as error
             }
@@ -3006,7 +3112,7 @@ public class TdsCore {
             build = in.read() << 8;
             build += in.read();
         } else {
-            if (product.toLowerCase().startsWith("microsoft")) {
+            if (product.toLowerCase( Locale.ENGLISH ).startsWith("microsoft")) {
                 in.skip(1);
                 major = in.read();
                 minor = in.read();
@@ -3058,16 +3164,41 @@ public class TdsCore {
         }
     }
 
-    /**
-     * Process a control token (function unknown).
-     *
-     * @throws IOException
-     */
-    private void tdsControlToken() throws IOException {
-        int pktLen = in.readShort();
+   /**
+    * <p> Process a control token. </p>
+    *
+    * <p> Token This data stream is used to tell the client about any user-defined
+    * format information for columns. It is used to support a facility in
+    * Transact-SQL that allows arbitrary, user-defined information to be
+    * associated with select target-list columns and then returned to the
+    * client. The SQL Server option control must be on for a server to return
+    * TDS_CONTROL data streams. This feature is used internally by some Sybase
+    * front-end applications. However, it is fairly obscure and normally unused
+    * by most customer applications. </p>
+    *
+    * FIXME: completely suppress control tokens, e.g. google "forces Adaptive Server to suppress TDS_CONTROL tokens"
+    * or see http://infocenter.sybase.com/help/index.jsp?topic=/com.sybase.infocenter.dc00075.1570/html/oledb/CHDCGBEH.htm
+    */
+   private void tdsControlToken()
+      throws IOException
+   {
+      // the total length, in bytes, of the remaining data stream
+      int pktLen = in.readShort();
 
-        in.skip(pktLen);
-    }
+      // don't process control token
+      in.skip( pktLen );
+
+      // the format described in the official TDS docs doesn't seem to be correct, at least for ASE
+
+//      // length, in bytes, of the control information that follows
+//      int fmtLen = in.read();
+//
+//      // This is the actual control information for a column. Its length is
+//      // fmtLen. If fmtLen is 0, this argument doesn’t exist in the data stream.
+//      // The fmt field is treated as a binary byte string. There is no character
+//      // set conversion performed on this argument.
+//      in.read( new byte[fmtLen] );
+   }
 
     /**
      * Process a row data token.
@@ -3444,26 +3575,31 @@ public class TdsCore {
         if (pktLen < hdrLen)
             throw new ProtocolException("NTLM challenge: packet is too small:" + pktLen);
 
-        byte[] ntlmMessage = new byte[pktLen];
+        ntlmMessage = new byte[pktLen];
         in.read(ntlmMessage);
 
         final int seq = getIntFromBuffer(ntlmMessage, 8);
         if (seq != 2)
             throw new ProtocolException("NTLM challenge: got unexpected sequence number:" + seq);
 
-        getIntFromBuffer( ntlmMessage, 20 );
+        final int flags = getIntFromBuffer( ntlmMessage, 20 );
+        //NOTE: the context is always included; if not local, then it is just
+        //      set to all zeros.
+        //boolean hasContext = ((flags &   0x4000) != 0);
+        //final boolean hasContext = true;
+        //NOTE: even if target is omitted, the length will be zero.
+        //final boolean hasTarget  = ((flags & 0x800000) != 0);
 
         //extract the target, if present. This will be used for ntlmv2 auth.
         final int headerOffset = 40; // The assumes the context is always there, which appears to be the case.
         //header has: 2 byte lenght, 2 byte allocated space, and four-byte offset.
         int size = getShortFromBuffer( ntlmMessage, headerOffset);
         int offset = getIntFromBuffer( ntlmMessage, headerOffset + 4);
-        currentToken.ntlmTarget = new byte[size];
-        System.arraycopy(ntlmMessage, offset, currentToken.ntlmTarget, 0, size);
+        ntlmTarget = new byte[size];
+        System.arraycopy(ntlmMessage, offset, ntlmTarget, 0, size);
 
-        currentToken.nonce = new byte[8];
-        currentToken.ntlmMessage = ntlmMessage;
-        System.arraycopy(ntlmMessage, 24, currentToken.nonce, 0, 8);
+        nonce = new byte[8];
+        System.arraycopy(ntlmMessage, 24, nonce, 0, 8);
     }
 
     private static int getIntFromBuffer(byte[] buf, int offset)
@@ -3527,7 +3663,22 @@ public class TdsCore {
      * @throws IOException
      */
     private void tdsDoneToken() throws IOException {
-        currentToken.status = (byte)in.read();
+
+      /*
+       * From http://msdn.microsoft.com/en-us/library/dd340421.aspx:
+       *
+       * The Status field MUST be a bitwise 'OR' of the following:
+       *
+       * 0x00 : DONE_FINAL. This DONE is the final DONE in the request.
+       * 0x1  : DONE_MORE. This DONE message is not the final DONE message in the response. Subsequent data streams to follow.
+       * 0x2  : DONE_ERROR. An error occurred on the current SQL statement. A preceding ERROR token SHOULD be sent when this bit is set.
+       * 0x4  : DONE_INXACT. A transaction is in progress.<11>
+       * 0x10 : DONE_COUNT. The DoneRowCount value is valid. This is used to distinguish between a valid value of 0 for DoneRowCount or just an initialized variable.
+       * 0x20 : DONE_ATTN. The DONE message is a server acknowledgement of a client ATTENTION message).
+       * 0x100: DONE_SRVERROR. Used in place of DONE_ERROR when an error occurred on the current SQL statement, which is severe enough to require the result set, if any, to be discarded.
+       */
+        currentToken.status = (byte) in.read();
+
         in.skip(1);
         currentToken.operation = (byte)in.read();
         in.skip(1);
@@ -3556,6 +3707,19 @@ public class TdsCore {
                 }
             }
         }
+        else
+        {
+           // check whether the DONE token signals an error but no ERROR token has been received before (see bug #508)
+           if( ! _ErrorReceived && ( currentToken.status & DONE_ERROR ) != 0 )
+           {
+              messages.addException( new SQLException( Messages.get( "error.generic.unspecified" ), "HY000" ) );
+           }
+        }
+
+        // reset flag, just in case this is an intermediate ERROR token, so
+        // the fix for bug #508 will also work if the problematic operation
+        // is preceeded by another statement that causes an error
+        _ErrorReceived = false;
 
         if ((currentToken.status & DONE_MORE_RESULTS) == 0) {
             //
@@ -4000,7 +4164,7 @@ public class TdsCore {
         } finally {
             if (timer != null) {
                 if (!TimerThread.getInstance().cancelTimer(timer)) {
-                    throw new SQLException(
+                    throw new SQLTimeoutException(
                           Messages.get("error.generic.timeout"), "HYT00");
                 }
             }
@@ -4079,7 +4243,7 @@ public class TdsCore {
         String name;
 
         try {
-            name = java.net.InetAddress.getLocalHost().getHostName().toUpperCase();
+            name = java.net.InetAddress.getLocalHost().getHostName().toUpperCase( Locale.ENGLISH );
         } catch (java.net.UnknownHostException e) {
             hostName = "UNKNOWN";
             return hostName;
@@ -4132,10 +4296,165 @@ public class TdsCore {
     }
 
    /**
+    * Sybase ASE only
+    */
+   private void tds5AltFormatToken()
+      throws IOException, ProtocolException
+   {
+      // total length, in bytes, of the remaining data stream
+      final int pktLen = in.readShort();
+
+      // This is the ID of the compute clause being described. It is legal for a
+      // Transact-SQL statement to have multiple compute clauses. The ID is used
+      // to associate TDS_ALTNAME, TDS_ALTFMT, and TDS_ALTROW data streams.
+      short id = in.readShort();
+      int bytesRead = 2;
+
+      // This is the number of aggregate operators in the compute clause.
+      // For example, the clause “compute count(x), min(x), max(x)” has three
+      // aggregate operators. This field is a one-byte, unsigned integer.
+      int computeByCount = in.read();
+
+      // load column meta data
+      for( int i = 0; i < computeByCount; ++ i )
+      {
+         ColInfo col = computedColumns[i];
+
+         // read type of aggregate operator
+         int type = in.read();
+
+         switch( type )
+         {
+            case 0x61: // row count (bigint)
+                       col.name = "count_big";
+                       break;
+
+            case 0x4B: // summary count value (TDS_ALT_COUNT)
+                       col.name = "count";
+                       break;
+
+            case 0x4D: // sum value (TDS_ALT_SUM)
+                       col.name = "sum";
+                       break;
+
+            case 0x4F: // average of the row values (TDS_ALT_AVG)
+                       col.name = "avg";
+                       break;
+
+            case 0x51: // minimum value (TDS_ALT_MIN)
+                       col.name = "min";
+                       break;
+
+            case 0x52: // maximum value (TDS_ALT_MAX)
+                       col.name = "max";
+                       break;
+
+            default:
+               throw new ProtocolException( "unsupported aggregation type 0x" + Integer.toHexString( type ) );
+         }
+
+         // This is the column number associated with OpType. The first column
+         // in the select list is 1. This argument is a one-byte, unsigned integer.
+         int columnIndex = in.read() - 1;
+
+         col.name       += "(" + columns[columnIndex].name + ")";
+         col.realName    = col.name;
+         col.tableName   = columns[columnIndex].tableName;
+         col.catalog     = columns[columnIndex].catalog;
+         col.schema      = columns[columnIndex].schema;
+
+         // This is the data type of the data and is a one-byte unsigned
+         // integer. Fixed length datatypes are represented by a single datatype
+         // byte and have no following Length argument. Variable length
+         // datatypes are followed by Length which gives the maximum datatype
+         // length, in bytes.
+         col.userType    = in.readInt();
+
+         // load type information
+         TdsData.readType( in, col );
+
+         // read locale information
+         int locLen = in.read();
+         String locale = in.readUnicodeString( locLen );
+      }
+
+      // This is the number of columns in the by-list of the compute clause.
+      // For example, the compute clause “compute count(sales) by year,
+      // month, division” has three by-columns. It is legal to have no
+      // bycolumns. In that case, # ByCols is 0. The argument is a one-byte,
+      // unsigned integer.
+      int byCols = in.read();
+
+      // When there are by-columns in a compute (#ByCols not equal to 0),
+      // there is one Col# argument for each select column listed in the
+      // bycolumns clause. For example, “select a, b, c order by b, a compute
+      // sum(a) by b, a” will return # ByCols as 2 followed by Col# 2 andCol#
+      // 1. The first column number is 1. This argument is a one-byte,
+      // unsigned integer.
+      for( int c = 0; c < byCols; c ++ )
+      {
+         in.skip( 1 );
+      }
+   }
+
+   /**
+    * Sybase ASE only
+    */
+   private void tds5AltNameToken()
+      throws IOException, ProtocolException
+   {
+      // total length, in bytes, of the remaining data stream
+      final int pktLen = in.readShort();
+
+      // This is the ID of the compute clause being described. It is legal for a
+      // Transact-SQL statement to have multiple compute clauses. The ID is used
+      // to associate TDS_ALTNAME, TDS_ALTFMT, and TDS_ALTROW data streams.
+      short id = in.readShort();
+      int bytesRead = 2;
+
+      // FIXME: There may bemore than one compute statement in a Transact-SQL
+      // compute clause. Each compute clause is assigned an ID. ID is used to
+      // associate the TDS_ALTFMT and TDS_ALTROW data streams. All TDS_ALTNAME
+      // data streams are grouped together and precede any TDS_ALTFMT data
+      // streams. If there is more than one compute statement, all the
+      // TDS_ALTNAME data streams for the compute come first, followed by the
+      // TDS_ALTFMT data streams.
+
+      ArrayList colList = new ArrayList();
+
+      // repeat for each operator in the compute clause
+      while( bytesRead < pktLen )
+      {
+         ColInfo col = new ColInfo();
+
+         // This the length, in bytes, of the name or heading for each of the
+         // aggregate operators in the compute clause. Aggregate operators are not
+         // required to have headings and usually don’t. In the null heading case,
+         // NameLen will be 0 and no name field will follow. There is a NameLen
+         // for each operator in a compute clause.
+         int nameLen = in.read();
+
+         // This is the compute clause heading. This argument is NameLen bytes long.
+         // If NameLen is 0, this argument does not exist.
+         String name = in.readNonUnicodeString( nameLen );
+
+         col.realName = name;
+         col.name = name;
+         colList.add( col );
+
+         bytesRead = bytesRead + 1 + nameLen;
+      }
+
+      int colCnt  = colList.size();
+      computedColumns = (ColInfo[]) colList.toArray(new ColInfo[colCnt]);
+      computedRowData = new Object[colCnt];
+   }
+
+   /**
     * <p> Process meta data for the computed result set complementing the
     * current result set. </p>
     */
-   private void tdsComputedResultToken()
+   private void tdsAltResultToken()
       throws IOException, ProtocolException
    {
       int ciolumns = in.readShort();
@@ -4239,7 +4558,7 @@ public class TdsCore {
    /**
     * <p> Process computed row data. </p>
     */
-   private void tdsComputedRowToken()
+   private void tdsAltRowToken()
       throws IOException, ProtocolException, SQLException
    {
       // unique ID of the SQL statement that created the that generated the totals
@@ -4252,6 +4571,44 @@ public class TdsCore {
       {
          computedRowData[i] = TdsData.readData( connection, in, computedColumns[i] );
       }
+   }
+
+   /**
+    * <p> Checks whether the <code>os.name</code> system property contains
+    * "windows". </p>
+    */
+   static boolean isWindowsOS()
+   {
+      return System.getProperty( "os.name" ).toLowerCase( Locale.ENGLISH ).contains( "windows" );
+   }
+
+   /**
+    * Initializes the GSS context and creates the initial token.
+    */
+   private byte[] createGssToken()
+      throws GSSException, UnknownHostException
+   {
+      GSSManager manager = GSSManager.getInstance();
+
+      // Oids for Kerberos5
+      Oid mech = new Oid( "1.2.840.113554.1.2.2" );
+      Oid nameType = new Oid( "1.2.840.113554.1.2.2.1" );
+
+      // Canonicalize hostname to create SPN like MIT Kerberos does
+      String host = InetAddress.getByName( socket.getHost() ).getCanonicalHostName();
+      int port = socket.getPort();
+
+      GSSName serverName = manager.createName( "MSSQLSvc/" + host + ":" + port, nameType );
+
+      Logger.println( "GSS: Using SPN " + serverName );
+
+      _gssContext = manager.createContext( serverName, mech, null, GSSContext.DEFAULT_LIFETIME );
+      _gssContext.requestMutualAuth( true );  // FIXME: may fail, check via _gssContext.getMutualAuthState()
+
+      byte[] token = _gssContext.initSecContext( new byte[0], 0, 0 );
+      Logger.println( "GSS: Created GSS token (length: " + token.length + ")" );
+
+      return token;
    }
 
 }

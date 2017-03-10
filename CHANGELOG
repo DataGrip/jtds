@@ -1,3 +1,107 @@
+Changes from jTDS 1.3.1
+=======================
+
+12/23/2016 - Holger Rehn
+ o Fixed bug #576, wrong conversion of INSERT to lowercase.
+ o Fixed wrong case conversion of key words and identifiers in certain locales.
+
+11/14/2014 - Holger Rehn
+ o Bugfix: The SQL parser's statement cache could have returned inappropriate
+   results if multiple connections use different settings for "prepareSQL" or
+   "sendStringParametersAsUnicode".
+
+11/13/2014 - Holger Rehn
+ o Bugfix: The size of the in-memory packet buffer wasn't monitored correctly,
+   potentially causing the driver to occupy an unpredictable (large or small)
+   amount of RAM buffer before switching to disk based caching.
+ o Applied patch #129 provided by lkoniecki (improved by Bain) to fix bug #725.
+
+05/30/2014 - Holger Rehn
+ o Fixed bug #726, using setMaxRows() may affect batch operations performed on
+   another Statement object using the same (physical) connection.
+
+10/29/2013 - Holger Rehn
+ o Fixed savepoint functionality for Sybase ASE that has been broken by the fix
+   for bug #569.
+
+10/28/2013 - Holger Rehn
+ o Fixed a bug that could cause an empty value being returned as a single
+   whitespace when using Sybase ASE.
+
+10/15/2013 - Holger Rehn
+ o Implemented support for the COMPUTE (BY) operator (bug #678) for Sybase ASE.
+
+09/06/2013 - Holger Rehn
+ o Removed synchronization from method getAutoCommit().
+
+09/03/2013 - Holger Rehn
+ o Fixed bug #715, infinite loop when parsing an SQL command.
+ o Fixed bug #710, invalid property handling in JtdsObjectFactory.
+
+===============================================================================
+06/08/2013 - jTDS 1.3.1 released
+===============================================================================
+
+Changes from jTDS 1.3.0
+=======================
+
+06/02/2013 - Holger Rehn
+ o Fixed bug #702, JtdsConnection.getMutex() isn't thread-safe.
+ o jTDS throws an SQLTimeoutException if an operation times out (bug #701).
+
+05/16/2013 - Holger Rehn
+ o Added range check to class BlobBuffer as proposed by Benedict Elliott Smith.
+ o Applied patch for explicitly creating an in-memory BlobBuffer provided by
+   Benedict Elliott Smith.
+
+05/03/2013 - Holger Rehn
+ o Fixed a bug that could cause the statement cache to be disabled. 
+ o Improved statement cache performance.
+ o Removed unnecessary synchronization overhead from SQL statement parser.
+
+05/01/2013 - Holger Rehn
+ o Fixed bug #687, JtdsObjectFactory don't accept the connection property name
+   mappings used in jTDS versions up to jTDS 1.2.6.
+
+04/02/2013 - Holger Rehn
+ o Fixed bug #699, conversion from timestamp String to Date fails.
+
+03/18/2013 - Holger Rehn
+ o Backported Kerberos support from jTDS 2.0.
+
+03/08/2013 - Holger Rehn
+ o Improved fix for bug #694, the previous attempt wasn't sufficient.
+
+03/07/2013 - Holger Rehn
+ o Applied fix for bug #695 provided by Keith Robinson.
+ o Fixed bug #694, jTDS logger may cause an NPE. 
+
+02/24/2013 - Holger Rehn
+ o Fixed bug #508, the driver ignored unspecified server errors signaled by a
+   TDS DONE token if no ERROR token has been received before.
+
+02/18/2013 - Holger Rehn
+ o Fixed bug #682, error when using date/time escapes in a procedure call.
+
+01/25/2013 - Holger Rehn
+ o Added test for JDBC date/time escapes used in a procedure call.
+
+12/24/2012 - Holger Rehn
+ o Added test for bug #686, SQL error invalidates a Statement's internal state.
+ o Fixed bug #626 by added a type mapping for java.math.BigInteger.
+
+12/19/2012 - Holger Rehn
+ o Applied fix for MSSQL 2000 compatibility provided by Andrew Fink (bug #683).
+
+11/15/2012 - Holger Rehn
+ o Fixed bug #552, jTDS fails to find an SQL Server instance if the discovery
+   requests' response is split into multiple network packets.
+
+10/28/2012 - Holger Rehn
+ o Added test for bug #575, parameter types not available via ParameterMetaData.
+ o Fixed build script, Maven artifacts are no longer included in the distro
+   package.
+
 ===============================================================================
 10/27/2012 - jTDS 1.3.0 released
 ===============================================================================

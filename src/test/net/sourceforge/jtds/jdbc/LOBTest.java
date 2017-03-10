@@ -21,6 +21,8 @@ import java.io.*;
 import java.sql.*;
 import java.util.*;
 
+import junit.framework.Assert;
+
 //
 // MJH - Changes for new jTDS version
 // Amended many lines such as those in testBlobSetNull6
@@ -56,15 +58,42 @@ public class LOBTest extends TestBase {
         newClobData = newData.toString();
     }
 
-    public LOBTest(String name) {
-        super(name);
-    }
+   public LOBTest( String name )
+   {
+      super( name );
+   }
 
-    /*************************************************************************
-     *************************************************************************
-     **                          BLOB TESTS                                 **
-     *************************************************************************
-     *************************************************************************/
+   /*************************************************************************
+    *************************************************************************
+    **                          BLOB TESTS                                 **
+    *************************************************************************
+    *************************************************************************/
+
+   /**
+    * <p> Test for bug #508, jTDS doesn't throw an exception when a connection
+    * is reset due to an error caused by insufficient server memory. </p>
+    */
+   public void testBug508()
+      throws Exception
+   {
+      final int BLOBSIZE = 250 * 1024 * 1024;
+
+      Statement statement = con.createStatement();
+      statement.executeUpdate( "create table #bug508 (A image)" );
+
+      PreparedStatement pstmt = con.prepareStatement( "insert into #bug508 (A) VALUES (?)" );
+      pstmt.setBytes( 1, new byte[BLOBSIZE] );
+
+      try
+      {
+         Assert.assertEquals( 1, pstmt.executeUpdate() );
+         con.createStatement().execute( "select 1" );
+      }
+      catch( SQLException sqle )
+      {
+         Assert.assertTrue( "S1000".equals( sqle.getSQLState() ) || "08S01".equals( sqle.getSQLState() ) || "HY000".equals( sqle.getSQLState() ) );
+      }
+   }
 
     public void testBlobGet1() throws Exception {
         byte[] data = getBlobTestData();
@@ -2068,7 +2097,7 @@ public class LOBTest extends TestBase {
         assertTrue(rs.next());
         Clob clob = rs.getClob(1);
         clob.setString(1, data.toString());
-        assertEquals((long)size, clob.length());
+        assertEquals(size, clob.length());
         assertTrue(data.toString().equals(clob.getSubString(1, (int)clob.length())));
         clob.setString(10, "THIS IS A TEST");
         data.replace(9, 23, "THIS IS A TEST");
@@ -2081,7 +2110,7 @@ public class LOBTest extends TestBase {
             os.write(data.charAt(i));
         }
         os.close();
-        assertEquals((long)size, clob.length());
+        assertEquals(size, clob.length());
         assertTrue(data.toString().equals(clob.getSubString(1, (int)clob.length())));
         InputStream is = clob.getAsciiStream();
         int b;
@@ -3013,36 +3042,38 @@ public class LOBTest extends TestBase {
         stmt.close();
     }
 
-    public void testClobCaching() throws Exception {
-        // Create a Clob large enough to need caching to disk
-        char[] in = new char[100000];
-        for (int i = 0; i < in.length; i++) {
-            // Store non-Cp1252 characters into it
-            in[i] = 0x2032;
-        }
+   public void testClobCaching()
+      throws Exception
+   {
+      // create a Clob large enough to need caching to disk
+      char[] in = new char[100000];
 
-        Statement stmt = con.createStatement();
-        stmt.executeUpdate("create table #testClobCaching (val ntext)");
+      // store non-Cp1252 characters into it
+      Arrays.fill( in, (char) 0x2032 );
 
-        PreparedStatement pstmt = con.prepareStatement(
-                "insert into #testClobCaching values (?)");
-        pstmt.setCharacterStream(1, new CharArrayReader(in), in.length);
-        pstmt.executeUpdate();
-        pstmt.close();
+      Statement stmt = con.createStatement();
+      stmt.executeUpdate( "create table #testClobCaching (val " + (isMSSQL() ? "ntext" : "unitext") + ")" );
 
-        ResultSet rs = stmt.executeQuery("select * from #testClobCaching");
-        assertTrue(rs.next());
-        String out = rs.getString(1);
-        assertEquals(in.length, out.length());
-        for (int i = 0; i < in.length; i++) {
-            if (in[i] != out.charAt(i)) {
-                fail("Result differs at position " + i);
-            }
-        }
-        assertFalse(rs.next());
-        rs.close();
-        stmt.close();
-    }
+      PreparedStatement pstmt = con.prepareStatement( "insert into #testClobCaching values (?)" );
+      pstmt.setCharacterStream( 1, new CharArrayReader( in ), in.length );
+      Assert.assertEquals( 1, pstmt.executeUpdate() );
+      pstmt.close();
+
+      ResultSet rs = stmt.executeQuery( "select * from #testClobCaching" );
+      assertTrue( rs.next() );
+      String out = rs.getString( 1 );
+      assertEquals( in.length, out.length() );
+      for( int i = 0; i < in.length; i++ )
+      {
+         if( in[i] != out.charAt( i ) )
+         {
+            fail( "Result differs at position " + i );
+         }
+      }
+      assertFalse( rs.next() );
+      rs.close();
+      stmt.close();
+   }
 
     /**
      * Test for incorrect handling of zero length streams (bug [1096086] Zero

@@ -14,14 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public
 // License along with this library; if not, write to the Free Software
 // Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-//
+
 package net.sourceforge.jtds.jdbc;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Locale;
 
-import net.sourceforge.jtds.jdbc.cache.SQLCacheKey;
 import net.sourceforge.jtds.jdbc.cache.SimpleLRUCache;
 
 /**
@@ -43,12 +43,9 @@ import net.sourceforge.jtds.jdbc.cache.SimpleLRUCache;
  * <ol>
  * <li>This code is designed to be as efficient as possible and as
  * result the validation done here is limited.
- * <li>SQL comments are parsed correctly thanks to code supplied by
- * Joel Fouse.
- * </ol>
  *
- * @author Mike Hutchinson
- * @version $Id: SQLParser.java,v 1.29 2007-07-08 17:28:23 bheineman Exp $
+ * @author
+ *    Mike Hutchinson, Holger Rehn
  */
 class SQLParser {
     /**
@@ -91,11 +88,11 @@ class SQLParser {
         }
     }
 
-    /** LRU cache of previously parsed SQL */
-    private static SimpleLRUCache cache;
+   /**
+    * a LRU cache for the last 1000 parsed SQL statements
+    */
+   private final static SimpleLRUCache<ConInfo,CachedSQLQuery> _Cache = new SimpleLRUCache( 1000 );
 
-    /** Original SQL string */
-    private final String sql;
     /** Input buffer with SQL statement. */
     private final char[] in;
     /** Current position in input buffer. */
@@ -119,75 +116,78 @@ class SQLParser {
     private String keyWord;
     /** First table name in from clause */
     private String tableName;
-    /** Connection object for server specific parsing. */
-    private final JtdsConnection connection;
 
-    /**
-     * Parse the SQL statement processing JDBC escapes and parameter markers.
-     *
-     * @param extractTable
-     *            true to return the first table name in the FROM clause of a select
-     * @return The processed SQL statement, any procedure name, the first SQL
-     *         keyword and (optionally) the first table name as
-     *         elements 0 1, 2 and 3 of the returned <code>String[]</code>.
-     * @throws SQLException if a parse error occurs
-     */
-    static String[] parse(String sql, ArrayList paramList,
-                          JtdsConnection connection, boolean extractTable)
-            throws SQLException {
-    	// Don't cache extract table parse requests, just process it
-    	if (extractTable) {
-    		SQLParser parser = new SQLParser(sql, paramList, connection);
-    		return parser.parse(extractTable);
-    	}
+   /**
+    * connection meta data required by the parser
+    */
+   private final ConInfo                                       _ConInfo;
 
-        SimpleLRUCache cache = getCache(connection);
 
-        SQLCacheKey cacheKey = new SQLCacheKey(sql, connection);
+   /**
+    * <p> Parse the SQL statement processing JDBC escapes and parameter markers.
+    * </p>
+    *
+    * @param extractTable
+    *    {@code true} to return the first table name in the FROM clause of a
+    *    SELECT
+    *
+    * @return
+    *    the processed SQL statement, any procedure name, the first SQL keyword
+    *    and (optionally) the first table name as elements 0, 1, 2 and 3 of the
+    *    returned {@code String[]}.
+    *
+    * @throws SQLException
+    *    if a parse error occurs
+    */
+   static String[] parse( String sql, ArrayList paramList, JtdsConnection connection, boolean extractTable )
+      throws SQLException
+   {
+      String[] ret;
+      ConInfo conInfo = new ConInfo( sql, connection );
 
-        // By not synchronizing on the cache, we're admitting that the possibility of multiple
-        // parses of the same statement can occur.  However, it is 1) unlikely under normal
-        // usage, and 2) harmless to the cache.  By avoiding a synchronization block around
-        // the get()-parse()-put(), we reduce the contention greatly in the nominal case.
-        CachedSQLQuery cachedQuery = (CachedSQLQuery) cache.get(cacheKey);
-        if (cachedQuery == null) {
-            // Parse and cache SQL
-            SQLParser parser = new SQLParser(sql, paramList, connection);
-            cachedQuery = new CachedSQLQuery(parser.parse(extractTable),
-                    paramList);
-            cache.put(cacheKey, cachedQuery);
-        } else {
-            // Create full ParamInfo objects out of cached object
-            final int length = (cachedQuery.paramNames == null)
-                    ? 0 : cachedQuery.paramNames.length;
-            for (int i = 0; i < length; i++) {
-                ParamInfo paramInfo = new ParamInfo(cachedQuery.paramNames[i],
-                                                    cachedQuery.paramMarkerPos[i],
-                                                    cachedQuery.paramIsRetVal[i],
-                                                    cachedQuery.paramIsUnicode[i]);
-                paramList.add(paramInfo);
+      // don't cache extract table parse requests
+      if( extractTable )
+      {
+         ret = new SQLParser( paramList, conInfo ).parse( extractTable );
+      }
+      else
+      {
+         // By not synchronizing on the cache, we're admitting that the possibility
+         // of multiple parses of the same statement can occur. However, it is
+         //   1) unlikely under normal usage, and
+         //   2) harmless to the cache.
+         // By avoiding a synchronization block around the get()-parse()-put(), we
+         // reduce the contention greatly in the nominal case.
+
+         CachedSQLQuery cachedQuery = _Cache.get( conInfo );
+
+         if( cachedQuery == null )
+         {
+            // parse statement
+            ret = new SQLParser( paramList, conInfo ).parse( extractTable );
+
+            // update LRU cache
+            _Cache.put( conInfo, new CachedSQLQuery( ret, paramList ) );
+         }
+         else
+         {
+            // REVIEW: potentially insecure, the array could be modified be the caller, corrupting the cache
+            ret = cachedQuery.parsedSql;
+
+            // create ParamInfo objects from CachedSQLQuery
+            int length = cachedQuery.paramNames == null ? 0 : cachedQuery.paramNames.length;
+
+            for( int i = 0; i < length; i ++ )
+            {
+               paramList.add( new ParamInfo( cachedQuery.paramNames[i], cachedQuery.paramMarkerPos[i], cachedQuery.paramIsRetVal[i], cachedQuery.paramIsUnicode[i] ) );
             }
-        }
-        return cachedQuery.parsedSql;
-    }
+         }
+      }
+
+      return ret;
+   }
 
     // --------------------------- Private Methods --------------------------------
-
-    /**
-     * Retrieves the statement cache, creating it if required.
-     *
-     * @return the cache as a <code>SimpleLRUCache</code>
-     */
-    private synchronized static SimpleLRUCache getCache(JtdsConnection connection) {
-        if (cache == null) {
-            int maxStatements = connection.getMaxStatements();
-            maxStatements = Math.max(0, maxStatements);
-            maxStatements = Math.min(1000, maxStatements);
-            cache = new SimpleLRUCache(maxStatements);
-        }
-        return cache;
-    }
-
 
     /** Lookup table to test if character is part of an identifier. */
     private static boolean identifierChar[] = {
@@ -212,8 +212,8 @@ class SQLParser {
     /**
      * Determines if character could be part of an SQL identifier.
      * <p/>
-     * Characters > 127 are assumed to be unicode letters in other
-     * languages than english which is reasonable in this application.
+     * Characters > 127 are assumed to be Unicode letters in other
+     * languages than English which is reasonable in this application.
      * @param ch the character to test.
      * @return <code>boolean</code> true if ch in A-Z a-z 0-9 @ $ # _.
      */
@@ -224,20 +224,18 @@ class SQLParser {
     /**
      * Constructs a new parser object to process the supplied SQL.
      *
-     * @param sqlIn     the SQL statement to parse
      * @param paramList the parameter list array to populate or
      *                  <code>null</code> if no parameters are expected
-     * @param connection the parent Connection object
+     * @param conInfo the parent Connection object
      */
-    private SQLParser(String sqlIn, ArrayList paramList, JtdsConnection connection) {
-        sql = sqlIn;
-        in  = sql.toCharArray();
+    private SQLParser(ArrayList paramList, ConInfo conInfo) {
+        in  = conInfo.sql.toCharArray();
         len = in.length;
         out = new char[len];
         params = paramList;
         procName = "";
 
-        this.connection = connection;
+        _ConInfo = conInfo;
     }
 
     /**
@@ -259,7 +257,7 @@ class SQLParser {
                             "2A000");
                 }
                 // param marker embedded in escape
-                ParamInfo pi = new ParamInfo(d, connection.getUseUnicode());
+                ParamInfo pi = new ParamInfo(d, _ConInfo.unicode );
                 params.add(pi);
             }
 
@@ -301,7 +299,7 @@ class SQLParser {
            append(in[s++]);
         }
 
-        return String.valueOf(out, start, d - start).toLowerCase();
+        return String.valueOf(out, start, d - start).toLowerCase( Locale.ENGLISH );
     }
 
     /**
@@ -318,7 +316,7 @@ class SQLParser {
                     "2A000");
         }
 
-        ParamInfo pi = new ParamInfo(pos, connection.getUseUnicode());
+        ParamInfo pi = new ParamInfo(pos, _ConInfo.unicode);
         pi.name = name;
 
         if (pos >= 0) {
@@ -432,14 +430,14 @@ class SQLParser {
       for( ; s < len; )
       {
          // skip whitespace
-         while( Character.isWhitespace( sql.charAt( s ) ) )
+         while( Character.isWhitespace( in[s] ) )
          {
             // skip white space without copying it
             s ++;
          }
 
          // check for comments to copy
-         switch( sql.charAt( s ) )
+         switch( in[s] )
          {
             case '-': // skip (and copy) single comment
                       if( s + 1 < len && in[s + 1] == '-' )
@@ -452,9 +450,14 @@ class SQLParser {
                             append( in[s ++] );
                          }
                       }
+                      else
+                      {
+                         return;
+                      }
+
                       break;
 
-            case '/': // skip multi line comment
+            case '/': // skip (and copy) multi line comment
                       if( s + 1 < len && in[s + 1] == '*' )
                       {
                          append( in[s ++] );
@@ -482,8 +485,14 @@ class SQLParser {
                         }
                         while( level > 0 );
                      }
+                     else
+                     {
+                        return;
+                     }
+
                      break;
-                     default: return;
+
+            default: return;
          }
       }
    }
@@ -613,7 +622,13 @@ class SQLParser {
             return in[s] == terminator;
         }
 
-        append( "convert(datetime,".toCharArray() );
+        // fix for bug #682, CONVERT not allowed in procedure or function calls
+        boolean sel = keyWord.equals( "select" );
+        if( sel )
+        {
+           append( "convert(datetime,".toCharArray() );
+        }
+
         append('\'');
         terminator = (in[s] == '\'' || in[s] == '"') ? in[s++] : '}';
         skipWhiteSpace();
@@ -675,7 +690,12 @@ class SQLParser {
 
         skipWhiteSpace();
         append('\'');
-        append(')');
+
+        if( sel )
+        {
+           append(')');
+        }
+
 
         return true;
     }
@@ -795,7 +815,7 @@ class SQLParser {
             nameBuf.append(in[s++]);
         }
 
-        String name = nameBuf.toString().toLowerCase();
+        String name = nameBuf.toString().toLowerCase( Locale.ENGLISH );
         //
         // Now collect arguments
         //
@@ -874,7 +894,7 @@ class SQLParser {
         // argument converted to an SQL server type
         //
         if ("convert".equals(name) && arg2Start < args.length() - 1) {
-            String arg2 = args.substring(arg2Start + 1).trim().toLowerCase();
+            String arg2 = args.substring(arg2Start + 1).trim().toLowerCase( Locale.ENGLISH );
             String dataType = (String) cvMap.get(arg2);
 
             if (dataType == null) {
@@ -895,7 +915,7 @@ class SQLParser {
         // See if function mapped
         //
         String fn;
-        if (connection.getServerType() == Driver.SQLSERVER) {
+        if (_ConInfo.serverType == Driver.SQLSERVER) {
             fn = (String) msFnMap.get(name);
             if (fn == null) {
                 fn = (String) fnMap.get(name);
@@ -1224,20 +1244,18 @@ class SQLParser {
             // building a plain query) and this is not a procedure call.
             //
             if (params != null && params.size() > 255
-                    && connection.getPrepareSql() != TdsCore.UNPREPARED
+                    && _ConInfo.prepareSql != TdsCore.UNPREPARED
                     && procName != null) {
                 int limit = 255; // SQL 6.5 and Sybase < 12.50
-                if (connection.getServerType() == Driver.SYBASE) {
-                    if (connection.getDatabaseMajorVersion() > 12 ||
-                            connection.getDatabaseMajorVersion() == 12 &&
-                            connection.getDatabaseMinorVersion() >= 50) {
+                if (_ConInfo.serverType == Driver.SYBASE) {
+                    if (_ConInfo.majorVersion > 12 || _ConInfo.majorVersion == 12 && _ConInfo.minorVersion >= 50) {
                         limit = 2000; // Actually 2048 but allow some head room
                     }
                 } else {
-                    if (connection.getDatabaseMajorVersion() == 7) {
+                    if (_ConInfo.majorVersion == 7) {
                         limit = 1000; // Actually 1024
                     } else
-                    if (connection.getDatabaseMajorVersion() > 7) {
+                    if (_ConInfo.majorVersion > 7) {
                         limit = 2000; // Actually 2100
                     }
 
@@ -1252,7 +1270,7 @@ class SQLParser {
             String result[] = new String[4];
 
             // return sql and procname
-            result[0] = (isModified) ? new String(out, 0, d) : sql;
+            result[0] = (isModified) ? new String(out, 0, d) : _ConInfo.sql;
             result[1] = procName;
             result[2] = (keyWord == null) ? "" : keyWord;
             result[3] = tableName;
@@ -1265,4 +1283,113 @@ class SQLParser {
                     "22025");
         }
     }
+
+   // private inner class ConInfo //////////////////////////////////////////////
+
+   /**
+    * <p> Primitive data structure holding all connection specifics required
+    * by the SQL parser. </p>
+    *
+    * <p> Instances of this class may are used as key values in the SQL parser's
+    * internal statement cache. </p>
+    *
+    * @author
+    *    Brett Wooldridge, Alin Sinpalean, Holger Rehn
+    */
+   private static class ConInfo
+   {
+
+      // public instance fields ////////////////////////////////////////////////
+
+      /**
+       * the unmodified original SQL statement
+       */
+      public final String  sql;
+
+      /**
+       * DB server type
+       */
+      public final int     serverType;
+
+      /**
+       * DB server major version
+       */
+      public final int     majorVersion;
+
+      /**
+       * DB server minor version
+       */
+      public final int     minorVersion;
+
+      /**
+       * setting of the connection property "prepareSQL"
+       */
+      public final int     prepareSql;
+
+      /**
+       * setting of the connection property "sendStringParametersAsUnicode"
+       */
+      public final boolean unicode;
+
+      // private instance fields ///////////////////////////////////////////////
+
+      /**
+       * object hash code
+       */
+      private final int    _HashCode;
+
+      // public constructor ////////////////////////////////////////////////////
+
+      /**
+       * <p> Construct a new {@link ConInfo} for the given SQL statement and
+       * {@link JtdsConnection}. </p>
+       *
+       * @param statement
+       *    the unmodified original SQL statement
+       *
+       * @param connection
+       *    {@link JtdsConnection} to extract relevant meta data from
+       */
+      public ConInfo( String statement, JtdsConnection connection )
+      {
+         sql          = statement;
+         serverType   = connection.getServerType();
+         majorVersion = connection.getDatabaseMajorVersion();
+         minorVersion = connection.getDatabaseMinorVersion();
+         prepareSql   = connection.getPrepareSql();
+         unicode      = connection.getUseUnicode();
+         _HashCode    = statement.hashCode() ^ ( serverType << 24 | majorVersion << 16 | minorVersion ) + prepareSql;
+      }
+
+      // overridden methods of class Object ////////////////////////////////////
+
+      /**
+       * {@inheritDoc}
+       */
+      public int hashCode()
+      {
+         return _HashCode;
+      }
+
+      /**
+       * {@inheritDoc}
+       */
+      public boolean equals( Object object )
+      {
+         if( ! ( object instanceof ConInfo ) )
+            return false;
+
+         ConInfo key = (ConInfo) object;
+
+         return _HashCode    == key._HashCode
+             && serverType   == key.serverType
+             && majorVersion == key.majorVersion
+             && minorVersion == key.minorVersion
+             && prepareSql   == key.prepareSql
+             && unicode      == key.unicode
+             && sql.equals( key.sql );
+      }
+
+   }
+
 }

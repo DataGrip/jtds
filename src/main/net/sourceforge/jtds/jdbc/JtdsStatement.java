@@ -25,6 +25,7 @@ import java.sql.SQLWarning;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -353,79 +354,115 @@ public class JtdsStatement implements java.sql.Statement
         messages.addWarning(w);
     }
 
-    /**
-     * Execute the SQL batch on a MS server.
-     *
-     * @param size the total size of the batch
-     * @param executeSize the maximum number of statements to send in one request
-     * @param counts the returned update counts
-     * @return chained exceptions linked to a <code>SQLException</code>
-     * @throws SQLException if a serious error occurs during execution
-     */
-    protected SQLException executeMSBatch(int size, int executeSize, ArrayList counts) throws SQLException {
-        SQLException sqlEx = null;
-        for (int i = 0; i < size;) {
-            Object value = batchValues.get(i);
-            ++i;
-            // Execute batch now if max size reached or end of batch
-            boolean executeNow = (i % executeSize == 0) || i == size;
+   /**
+    * <p> Execute the SQL batch on a MS server. </p>
+    *
+    * @param size
+    *    total size of the batch
+    *
+    * @param executeSize
+    *    maximum number of statements to send in one request
+    *
+    * @param counts
+    *    the returned update counts
+    *
+    * @return
+    *    chained exceptions linked to a <code>SQLException</code>
+    *
+    * @throws SQLException
+    *    if a serious error occurs during execution
+    */
+   protected SQLException executeMSBatch( int size, int executeSize, ArrayList counts )
+      throws SQLException
+   {
+      SQLException sqlEx = null;
+      for( int i = 0; i < size; )
+      {
+         Object value = batchValues.get( i );
+         ++ i;
 
-            tds.startBatch();
-            tds.executeSQL((String) value, null, null, false, 0, -1, -1, executeNow);
+         // Execute batch now if max size reached or end of batch
+         boolean executeNow = (i % executeSize == 0) || i == size;
 
-            // If the batch has been sent, process the results
-            if (executeNow) {
-                sqlEx = tds.getBatchCounts(counts, sqlEx);
+         tds.startBatch();
 
-                // If a serious error then we stop execution now as count
-                // is too small.
-                if (sqlEx != null && counts.size() != i) {
-                    break;
-                }
+         // provide statement's ROWCOUNT and TEXTSIZE (see bug #726)
+         tds.executeSQL( (String) value, null, null, false, 0, maxRows, maxFieldSize, executeNow );
+
+         // If the batch has been sent, process the results
+         if( executeNow )
+         {
+            sqlEx = tds.getBatchCounts( counts, sqlEx );
+
+            // If a serious error then we stop execution now as count
+            // is too small.
+            if( sqlEx != null && counts.size() != i )
+            {
+               break;
             }
-        }
-        return sqlEx;
-    }
+         }
+      }
+      return sqlEx;
+   }
 
-    /**
-     * Execute the SQL batch on a Sybase server.
-     * <p/>
-     * Sybase needs to have the SQL concatenated into one TDS language packet. This method will be overriden for
-     * <code>PreparedStatements</code>.
-     *
-     * @param size the total size of the batch
-     * @param executeSize the maximum number of statements to send in one request
-     * @param counts the returned update counts
-     * @return chained exceptions linked to a <code>SQLException</code>
-     * @throws SQLException if a serious error occurs during execution
-     */
-    protected SQLException executeSybaseBatch(int size, int executeSize, ArrayList counts) throws SQLException {
-        StringBuilder sql = new StringBuilder(size * 32); // Make buffer reasonable size
-        SQLException sqlEx = null;
+   /**
+    * <p> Execute the SQL batch on a Sybase server. </p>
+    *
+    * <p> Sybase needs to have the SQL concatenated into one TDS language
+    * packet. This method will be overridden for {@link PreparedStatements}. </p>
+    *
+    * @param size
+    *    total size of the batch
+    *
+    * @param executeSize
+    *    maximum number of statements to send in one request
+    *
+    * @param counts
+    *    the returned update counts
+    *
+    * @return
+    *    chained exceptions linked to a <code>SQLException</code>
+    *
+    * @throws SQLException
+    *    if a serious error occurs during execution
+    */
+   protected SQLException executeSybaseBatch( int size, int executeSize, ArrayList counts )
+      throws SQLException
+   {
+      StringBuilder sql = new StringBuilder( size * 32 ); // Make buffer
+                                                          // reasonable size
+      SQLException sqlEx = null;
 
-        for (int i = 0; i < size;) {
-            Object value = batchValues.get(i);
-            ++i;
-            // Execute batch now if max size reached or end of batch
-            boolean executeNow = (i % executeSize == 0) || i == size;
+      for( int i = 0; i < size; )
+      {
+         Object value = batchValues.get( i );
+         ++ i;
 
-            sql.append((String) value).append(' ');
+         // execute batch now if max size reached or end of batch
+         boolean executeNow = ( i % executeSize == 0 ) || i == size;
 
-            if (executeNow) {
-                tds.executeSQL(sql.toString(), null, null, false, 0, -1, -1, true);
-                sql.setLength(0);
-                // If the batch has been sent, process the results
-                sqlEx = tds.getBatchCounts(counts, sqlEx);
+         sql.append( (String) value ).append( ' ' );
 
-                // If a serious error or a server error then we stop
-                // execution now as count is too small.
-                if (sqlEx != null && counts.size() != i) {
-                    break;
-                }
+         if( executeNow )
+         {
+            // provide statement's ROWCOUNT and TEXTSIZE (see bug #726)
+            tds.executeSQL( sql.toString(), null, null, false, 0, maxRows, maxFieldSize, true );
+
+            sql.setLength( 0 );
+
+            // if the batch has been sent, process the results
+            sqlEx = tds.getBatchCounts( counts, sqlEx );
+
+            // if a serious error or a server error then we stop execution now as count is too small
+            if( sqlEx != null && counts.size() != i )
+            {
+               break;
             }
-        }
-        return sqlEx;
-    }
+         }
+      }
+
+      return sqlEx;
+   }
 
     /**
      * Executes SQL to obtain a result set.
@@ -487,11 +524,9 @@ public class JtdsStatement implements java.sql.Statement
             // There is cached meta data available for this
             // prepared statement
             tds.setColumns(colMetaData);
-            tds.executeSQL(sql, spName, params, true, queryTimeout, maxRows,
-                    maxFieldSize, true);
+            tds.executeSQL(sql, spName, params, true, queryTimeout, maxRows, maxFieldSize, true);
         } else {
-            tds.executeSQL(sql, spName, params, false, queryTimeout, maxRows,
-                    maxFieldSize, true);
+            tds.executeSQL(sql, spName, params, false, queryTimeout, maxRows, maxFieldSize, true);
         }
 
         // Update warning chain if cursor was downgraded before processing results
@@ -560,8 +595,7 @@ public class JtdsStatement implements java.sql.Statement
         // We are talking to a Sybase server or we could not open a cursor
         // or we did not have a SELECT so just execute the SQL normally.
         //
-        tds.executeSQL(sql, spName, params, false, queryTimeout, maxRows,
-                maxFieldSize, true);
+        tds.executeSQL(sql, spName, params, false, queryTimeout, maxRows, maxFieldSize, true);
 
         if (warningMessage != null) {
             // Update warning chain if cursor was downgraded
@@ -773,7 +807,7 @@ public class JtdsStatement implements java.sql.Statement
             // see if we can extract "insert" from start of statement
             sql = sql.trim();
             if (sql.length() > 5) {
-                sqlWord = sql.substring(0,6).toLowerCase();
+                sqlWord = sql.substring(0,6).toLowerCase( Locale.ENGLISH );
             }
         }
 

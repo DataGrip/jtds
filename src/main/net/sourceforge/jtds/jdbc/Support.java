@@ -41,6 +41,7 @@ import java.sql.Types;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
 import java.util.HashMap;
+import java.util.Locale;
 
 import net.sourceforge.jtds.util.Logger;
 
@@ -59,7 +60,7 @@ import net.sourceforge.jtds.util.Logger;
  *
  * @author Mike Hutchinson
  * @author jTDS project
- * @version $Id: Support.java,v 1.56.2.6 2010-05-17 09:36:57 ickzon Exp $
+ * @author Holger Rehn
  */
 public class Support {
     // Constants used in datatype conversions to avoid object allocations.
@@ -105,6 +106,8 @@ public class Support {
         typeMap.put(String.class,             new Integer(java.sql.Types.VARCHAR));
         typeMap.put(Blob.class,               new Integer(java.sql.Types.LONGVARBINARY));
         typeMap.put(Clob.class,               new Integer(java.sql.Types.LONGVARCHAR));
+        // bug #626
+        typeMap.put(BigInteger.class,         new Integer(java.sql.Types.BIGINT));
     }
 
     /**
@@ -503,7 +506,7 @@ public class Support {
                           else if( len > 7 && val.charAt( 2 ) == ':' )
                           {
                              // get rid of fractions of seconds
-                             return new Timestamp( Time.valueOf( val.trim().split("\\.")[0].trim() ).getTime() );
+                             return new Timestamp( Time.valueOf( val.split("\\.")[0].trim() ).getTime() );
                           }
                        }
                        catch( IllegalArgumentException ie )
@@ -546,7 +549,7 @@ public class Support {
                           else if( len > 10 && val.charAt( 4 ) == '-' )
                           {
                              // get rid of the time part
-                             return Timestamp.valueOf( val.split( " " )[0].trim() );
+                             return Date.valueOf( val.split( " " )[0].trim() );
                           }
                           // maybe a TIME (format: [h]h:[m]m:[s]s)
                           // optional conversion not required by the JDBC specs
@@ -1388,7 +1391,7 @@ public class Support {
      * else <code>false</code>.
      */
     public static boolean isWindowsOS() {
-        return System.getProperty("os.name").toLowerCase().startsWith("windows");
+        return System.getProperty("os.name").toLowerCase( Locale.ENGLISH ).startsWith("windows");
     }
 
     // ------------- Private methods  ---------

@@ -30,6 +30,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Locale;
 
 /**
  * Test case to illustrate use of TDS 9 support
@@ -804,7 +805,7 @@ public class Tds9Test extends TestBase
    private boolean supportsTDS9()
       throws NumberFormatException, SQLException
    {
-      return con.getMetaData().getDatabaseProductName().toLowerCase().contains( "microsoft" ) && Integer.parseInt( con.getMetaData().getDatabaseProductVersion().split( "\\." )[0] ) >= 9;
+      return con.getMetaData().getDatabaseProductName().toLowerCase( Locale.ENGLISH ).contains( "microsoft" ) && Integer.parseInt( con.getMetaData().getDatabaseProductVersion().split( "\\." )[0] ) >= 9;
    }
 
 }

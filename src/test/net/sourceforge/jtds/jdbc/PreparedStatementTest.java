@@ -28,9 +28,101 @@ import junit.framework.Assert;
  */
 public class PreparedStatementTest extends TestBase {
 
-    public PreparedStatementTest(String name) {
-        super(name);
-    }
+   public PreparedStatementTest( String name )
+   {
+      super(name);
+   }
+
+   /**
+    * Test for trailing line comment breaking connection state on metadata
+    * retrieval when autocommit is false
+    */
+   public void testBug695()
+      throws Exception
+   {
+      Connection localCon = getConnection();
+
+      Statement stmt = localCon.createStatement( ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_UPDATABLE );
+
+      stmt.executeUpdate( "CREATE TABLE #metaData (id int, data varchar(8000))" );
+      stmt.executeUpdate( "INSERT INTO #metaData (id, data) VALUES (1, 'Data1')" );
+      stmt.close();
+
+      // If AutoCommit is true then the test will pass
+      localCon.setAutoCommit( false );
+
+      // If the trailing SQL line comment is removed from the statement
+      // text then the test will pass
+      PreparedStatement pstmt = localCon.prepareStatement( "SELECT id FROM #metaData WHERE data=? GROUP BY id--" );
+
+      ResultSetMetaData rsmd = pstmt.getMetaData();
+      // Tracing with SQLProfiler shows execution of :
+      // SET FMTONLY ON SELECT id ... GROUP BY id-- SET FMTONLY OFF
+      // So the SET FMTONLY OFF is ignored, all following statements are
+      // executed with FMTONLY ON
+
+      assertNotNull( "No meta data returned for simple statement", rsmd );
+
+      assertEquals( 1, rsmd.getColumnCount() );
+      assertEquals( "id", rsmd.getColumnName( 1 ) );
+
+      pstmt.close();
+
+      // Simple statement that should return a row
+      // but we don't get a row with setAutoCommit(false) and the trailing --
+      // Tracing with SQLProfiler shows execution of
+      pstmt = localCon.prepareStatement( "SELECT getdate()" );
+      ResultSet rs = pstmt.executeQuery();
+      Assert.assertTrue( rs.next() );
+
+      rs.close();
+      pstmt.close();
+      localCon.close();
+   }
+
+   public void testBug686()
+      throws Exception
+   {
+      PreparedStatement st = null;
+
+      try
+      {
+         st = con.prepareStatement( "set xact_abort on\n" + // hmm. only with TX?...
+                                    // "begin tran\n" +
+                                    "create table #temp (id int not null primary key)\n" + // Result 1 is an update count: 0 null
+                                    "insert #temp values (1)\n" + // Result 2 is an update count: 1 null
+                                    "select * from #temp\n" + // Result 3 is a ResultSet: SQLServerResultSet:1
+                                    "insert #temp values (2);\n" + // Result 4 is an update count: 1 null
+
+                                    // Result 5 is an error: com.microsoft.sqlserver.jdbc.SQLServerException: Invalid object name '#notexists'.
+                                    "update #notexists set bar=1;\n" +
+
+                                    "insert #temp select * from #temp\n" + // [end] Done processing 4 results
+                                    "drop table #temp\n" +
+                                    // "commit\n" +
+                                    "select @@error, @@trancount;\n" );
+
+         st.execute();
+
+         try
+         {
+            dumpAll( st );
+            fail( "expected an error: Invalid object name '#notexists'" );
+         }
+         catch( Exception e )
+         {
+            // expected,
+         }
+
+         // dump the remaining result (used to fail due to bug #686)
+         dumpAll( st );
+      }
+      finally
+      {
+         st.close();
+         con.close();
+      }
+   }
 
    public void testBug657()
       throws Exception
@@ -149,23 +241,27 @@ public class PreparedStatementTest extends TestBase {
      * Test for [924030] EscapeProcesser problem with "{}" brackets
      */
     public void testPreparedStatementParsing1() throws Exception {
+
+        dropProcedure( "sp_psp1" );
+        dropTable( "psp1" );
+
         String data = "New {order} plus {1} more";
         Statement stmt = con.createStatement();
 
-        stmt.execute("CREATE TABLE #psp1 (data VARCHAR(32))");
+        stmt.execute("CREATE TABLE psp1 (data VARCHAR(32))");
         stmt.close();
 
         stmt = con.createStatement();
-        stmt.execute("create procedure #sp_psp1 @data VARCHAR(32) as INSERT INTO #psp1 (data) VALUES(@data)");
+        stmt.execute("create procedure sp_psp1 @data VARCHAR(32) as INSERT INTO psp1 (data) VALUES(@data)");
         stmt.close();
 
-        PreparedStatement pstmt = con.prepareStatement("{call #sp_psp1('" + data + "')}");
+        PreparedStatement pstmt = con.prepareStatement("{call sp_psp1('" + data + "')}");
 
         pstmt.execute();
         pstmt.close();
 
         stmt = con.createStatement();
-        ResultSet rs = stmt.executeQuery("SELECT data FROM #psp1");
+        ResultSet rs = stmt.executeQuery("SELECT data FROM psp1");
 
         assertTrue(rs.next());
 
@@ -870,7 +966,7 @@ public class PreparedStatementTest extends TestBase {
    public void testPrepareFailWarning() throws SQLException
    {
       // preparation succeeds in SQL server 2008 and above (what about Sybase?)
-      if( con.getMetaData().getURL().toLowerCase().contains( "microsoft" ) && con.getMetaData().getDatabaseMajorVersion() < 10 )
+      if( con.getMetaData().getURL().toLowerCase( Locale.ENGLISH ).contains( "microsoft" ) && con.getMetaData().getDatabaseMajorVersion() < 10 )
       {
          try
          {
