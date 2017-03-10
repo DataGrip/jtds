@@ -47,7 +47,7 @@ class TdsTlsOutputStream extends FilterOutputStream
    /**
     * used for holding back CKE, CCS and FIN records
     */
-   final private List<byte[]> _BufferedRecords = new ArrayList<>();
+   final private List<byte[]> _BufferedRecords = new ArrayList<byte[]>();
 
    /**
     * total size of all deferred records in {@link #_BufferedRecords}
